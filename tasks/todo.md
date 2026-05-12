@@ -1,6 +1,91 @@
 # Active task
 
-Nothing in progress. WS-002 complete; next workstream TBD.
+Nothing in progress. WS-002b fixes applied; next workstream TBD.
+
+# Last completed: WS-002b — DontDestroyOnLoad + EventSystem fixes (2026-05-13)
+
+Designer playtest of WS-002/WS-003 surfaced two defects in my prior hand-authored work.
+Captured as `tasks/lessons.md` L-001 and L-002 and as project memories.
+
+## Done
+- [x] `GameManager.cs`, `EventBus.cs`, `SaveManager.cs`: changed
+      `DontDestroyOnLoad(gameObject)` → `DontDestroyOnLoad(transform.root.gameObject)`.
+      Comment added explaining why (`Managers` parent in Boot.unity). Without this, the
+      whole singleton hierarchy was destroyed at the first scene transition because
+      `DontDestroyOnLoad` silently no-ops on non-root GameObjects.
+- [x] `MainMenu.unity`: added `InputSystemUIInputModule` MonoBehaviour (fileID 403,
+      script guid `01614664b831546d2ae94a42149d80ac`) to the EventSystem GameObject
+      (fileID 400). Minimal YAML entry — `OnEnable` calls `AssignDefaultActions()`
+      to auto-bind defaults. Previous scene had only the `EventSystem` script with no
+      input module, so UI clicks went nowhere.
+- [x] `tasks/lessons.md` written with both patterns (L-001 root-persist, L-002
+      InputSystem UI module). Paste-able pattern blocks included.
+- [x] Persistent memories written under
+      `C:\Users\admin\.claude\projects\c--Unity-Hellpit-Rampage\memory\`:
+      `feedback_dontdestroyonload_root.md`, `feedback_inputsystem_ui_module.md`,
+      `project_singletons_in_managers_parent.md`, plus `MEMORY.md` index.
+
+## Designer follow-up
+- [ ] Re-test `Boot.unity → MainMenu → Start Run → Game` flow. Verify:
+      (a) no more `DontDestroyOnLoad only works for root GameObjects` warning,
+      (b) singletons persist through MainMenu and Game,
+      (c) Start Run button responds to click and transitions to Game scene.
+- [ ] When ready, push (or let me know — push already happened for WS-002 base).
+
+## Open question for the designer
+
+The user offered: "WS-004's PoolManager spec already has the same flawed pattern —
+inline correction at WS-004 start, or a small WS-002b cleanup spec?"
+My preference: **inline correction at WS-004 start**. The fix is now baked into the
+existing singletons + captured in `tasks/lessons.md` L-001 + saved as a project memory,
+so future agents will pick up the pattern without a separate spec. A WS-002b document
+would just duplicate what's already in lessons.md.
+
+# Last completed: WS-003 Hero Movement + Camera Follow (2026-05-13, not yet committed)
+
+Spec: `WS-003_Hero_Movement_And_Camera.md` (provided inline by designer).
+
+## Done
+- [x] Generated `Assets/_Project/Sprites/Heroes/placeholder_hero.png` via PowerShell `System.Drawing.Bitmap` — 64x64 ARGB, 62x62 white interior, 1px transparent border. Verified signature `89504e470d0a1a0a`, dimensions 64x64, alpha=0 at corners, RGBA(255,255,255,255) at center.
+- [x] Wrote `placeholder_hero.png.meta` (TextureImporter) with `textureType: 8` (Sprite), `spriteMode: 1` (Single), `spritePixelsToUnits: 64`, `filterMode: 1` (Bilinear), `textureCompression: 0` (None) on both DefaultTexturePlatform + Standalone, `alphaIsTransparency: 1`.
+- [x] `Assets/_Project/Scripts/Combat/PlayerController.cs` in `HellpitRampage.Combat`: reads `_input.Player.Movement` in `Update`, normalizes diagonals only when `sqrMagnitude > 1f`, applies `_rb.linearVelocity = _moveInput * _moveSpeed` in `FixedUpdate`. `_moveSpeed = 5f` `[SerializeField]`. Added `OnDestroy → _input?.Dispose()` (small addition vs spec — `PlayerInputActions.Dispose()` destroys the InputActionAsset; without this the asset leaks on scene reload when the Player is destroyed).
+- [x] `Assets/_Project/Scripts/UI/MainMenuController.cs` in `HellpitRampage.UI` exactly per spec.
+- [x] Hand-authored `Assets/_Project/Prefabs/Player/Player.prefab`: GameObject `Player` + Transform + SpriteRenderer (sprite = placeholder_hero, fileID 21300000) + Rigidbody2D (Dynamic / gravity 0 / damping 0+0.05 / Interpolate / Continuous / `m_Constraints: 4` = FreezeRotationZ) + CircleCollider2D (radius 0.4, not trigger) + PlayerController MonoBehaviour with `_moveSpeed: 5`.
+- [x] Rewrote `Game.unity`: removed Canvas/Scaler/Raycaster/PlaceholderText/EventSystem; kept singletons + Main Camera but changed background to `(0.10196, 0.10196, 0.10196)` ≈ `#1a1a1a` and orthographic size 7; added `CinemachineBrain` (`72ece51f2901e7445ab60da3685d6b5f`) on Main Camera; added `CM Player Follow` GameObject with `CinemachineCamera` (`f9dfa5b682dcd46bda6128250e975f58`) targeting Player Transform via `Target.TrackingTarget: {fileID: 601}` + `CinemachineFollow` (`b617507da6d07e749b7efdb34e1173e1`) with `PositionDamping (0.2, 0.2, 0.2)` / `FollowOffset (0, 0, -10)` / `BindingMode 4` (WorldSpace) / `QuaternionDamping 0`; added Player (inlined — see deviation); added `ReferenceMarkers` empty parent with 6 children (`Ref_01`..`Ref_06`) at `(±6, ±3, 0)` + `(0, ±4, 0)`, scale `(0.5, 0.5, 1)`, 6 distinct tint colors.
+- [x] Modified `MainMenu.unity`: added `StartRunButton` GameObject (Image + Button) as Canvas child at anchored `(0, -160)` size `320x90`, with child Text "Start Run" (size 32, bold, dark gray on white button using built-in UISprite fileID 10907); added top-level `MainMenuController` GameObject with the script and `_startRunButton` SerializeField wired to fileID 504 (the Button component).
+- [x] GUID uniqueness verified across `Assets/**/*.meta` — no duplicates.
+- [x] Scene/prefab YAML sanity: unique fileIDs (Game.unity 40, MainMenu.unity 33, Player.prefab 6), no BOM, `%YAML 1.1` header intact, cross-references resolve (CinemachineCamera→Player Transform, Button→Image targetGraphic, MainMenuController→Button).
+
+## Deviations from spec (explicit)
+
+- **Player in Game.unity is inlined, not a PrefabInstance.** Spec says "drag Player.prefab into the scene at (0,0,0)." Hand-authoring a Unity-6 `!u!1001 PrefabInstance` block + stripped child components is fragile without the editor (no `PrefabInstance` examples in the local package cache to model from byte-for-byte). The Player components are inlined in `Game.unity` with the same values as `Player.prefab`, referencing the same sprite by GUID. The prefab still exists at the spec'd path and is ready for use in future specs. **Designer follow-up:** open Unity, delete the inlined Player (GameObjects 600/601/602/603/604/605), drag `Player.prefab` into the scene at (0,0,0), re-point `CM Player Follow → CinemachineCamera → Tracking Target` to the new prefab-instance Transform. ~30 seconds in the editor.
+- **Legacy `UI.Text` on the Start Run button + label**, consistent with WS-001/WS-002 TMP deferral. Spec is explicit about Legacy.
+- **`PlayerController.OnDestroy → _input?.Dispose()`** added (not in spec). Reason: generated `PlayerInputActions.Dispose()` destroys the InputActionAsset; without this we'd leak an asset across scene reloads.
+
+## Acceptance criteria (from spec § 4)
+
+- [x] `placeholder_hero.png` exists at the spec path with correct import settings (PPU 64, no compression)
+- [x] `Player.prefab` exists with `SpriteRenderer`, `Rigidbody2D` (Dynamic / gravity 0 / freeze rotation Z / Interpolate / Continuous), `CircleCollider2D` (radius 0.4), `PlayerController`
+- [x] `PlayerController.cs` in `HellpitRampage.Combat`, reads `PlayerInputActions`, normalizes diagonals, applies `linearVelocity` in `FixedUpdate`
+- [x] `_moveSpeed` is `[SerializeField]` defaulting to `5f`
+- [x] `Game.unity` contains a Player instance (inlined — see deviation), `CinemachineCamera` with Follow→Player, reference markers
+- [x] `Main Camera` in `Game.unity` has `CinemachineBrain` and Orthographic Size `7`
+- [x] `MainMenu.unity` has a `Start Run` button wired to `MainMenuController` which calls `GameManager.TransitionTo(GameState.InRun)`
+- [ ] **Pressing Play on `Boot.unity`: Boot → MainMenu → click Start Run → Game scene loads, no Console errors** — designer must verify
+- [ ] **Manual playtest: 8-direction at consistent speed, instant input response, no slide on release, smooth camera follow with slight damping, no jitter** — designer must verify
+- [x] Code follows Tech Arch §4 conventions
+- [ ] **Committed with `[WS-003] Hero movement + Cinemachine camera follow` and pushed** — not yet, awaiting Play-test pass
+
+## Review notes
+
+- **Cinemachine fields modeled from `Library/PackageCache/com.unity.cinemachine@285f38545487/Samples~/2D Samples/CameraMagnets.unity` (CinemachineCamera + CinemachineBrain) and `3D Samples/Brain Update Modes.unity` (CinemachineFollow).** These are byte-for-byte Unity 6 / Cinemachine 3.1.6 outputs — the version locked in `Packages/manifest.json`.
+- **`CinemachineFollow.BindingMode = 4` (WorldSpace)** — what the 3D sample uses; correct for top-down 2D where the camera doesn't inherit player rotation. Player has FreezeRotationZ anyway; belt-and-suspenders.
+- **`m_Constraints: 4` = `RigidbodyConstraints2D.FreezeRotation`** (Z on a 2D body). Unity enum: `None=0, FreezePositionX=1, FreezePositionY=2, FreezeRotation=4, FreezePosition=3, FreezeAll=7`.
+- **2D physics class IDs verified empirically:** 50 = Rigidbody2D, 61 = BoxCollider2D, 212 = SpriteRenderer (all confirmed from `2D Platformer.unity`). 58 = CircleCollider2D per Unity's documented class IDs (stable for years).
+- **Sprite fileID `21300000`** is Unity's standard fileID for a single-mode sprite imported from a texture asset.
+- **Built-in UISprite fileID `10907`** referenced by the Button's Image is Unity's default rounded UI background; same one the editor assigns from the menu.
+- **No automated tests** (per spec § 2 OUT-of-scope + § 5 — movement feel is manual playtest territory).
+- **Risk**: hand-authored scene/prefab YAML cannot be Play-tested from this environment. Designer Play-test in `Boot.unity` is the final gate.
 
 # Last completed: WS-002 Core Singletons (2026-05-13)
 

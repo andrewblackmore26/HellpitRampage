@@ -25,7 +25,9 @@ namespace HellpitRampage.Core
             }
 
             Instance = this;
-            DontDestroyOnLoad(gameObject);
+            // DontDestroyOnLoad only works on root GameObjects. The singleton sits under a
+            // `Managers` parent in Boot.unity for hierarchy organization, so persist the root.
+            DontDestroyOnLoad(transform.root.gameObject);
         }
 
         private void OnDestroy()
