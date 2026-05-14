@@ -41,6 +41,19 @@ namespace HellpitRampage.Combat
             Despawn();
         }
 
+        /// <summary>
+        /// Auto-collects this pickup without requiring player overlap. Used by
+        /// <see cref="GoldFieldSweeper"/> at round end so the field never carries
+        /// uncollected gold between rounds. Idempotent via the shared `_isDespawned`
+        /// guard (L-005).
+        /// </summary>
+        public void ForceCollect()
+        {
+            if (_isDespawned) return;
+            if (RunManager.Instance != null) RunManager.Instance.AddGold(_amount);
+            Despawn();
+        }
+
         private void Despawn()
         {
             if (_isDespawned) return;
