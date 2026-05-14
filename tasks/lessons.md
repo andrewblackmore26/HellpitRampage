@@ -893,6 +893,45 @@ hand-wiring in the Inspector, defeating the whole "code-built" approach) or leav
 
 ---
 
+## L-015 — Newer specs may reference dead patterns from earlier specs that were since revised
+
+**Surfaced during:** WS-012.5 implementation (designer feedback — *"Grid items already work the way I want (click → detail tooltip with lock icon) because of WS-012.1. Ground items in the WS-012.5 spec were drafted before WS-012.1 existed, so they still reference the old right-click-to-lock pattern that no longer exists."*).
+
+**The mistake (partial, caught mid-implementation):** WS-012.5 §4.7 / §4.14 told me to "reuse `LockToggleHandler` from WS-012" and to attach `TooltipTarget` (hover) to the ground item prefab. Both are pre-WS-012.1 patterns:
+- `LockToggleHandler.cs` was DELETED in WS-012.1; locking moved to `DetailTooltipController` via `GridClickTooltipHandler` (left-click opens the popup with the lock action icon).
+- `TooltipTarget` (hover-on-grid-items) was REPLACED in WS-012.1 by `GridClickTooltipHandler` (left-click); the hover behavior was intentionally retired so grid items have a single click affordance.
+
+I caught most of it pre-emptively (asked the designer the ground-item lock UX question before writing code, picked "match grid pattern") — but I still added `TooltipTarget` to the ground item prefab out of habit/spec-fidelity. Designer caught the leftover and pointed it out.
+
+**Why this trap is different from L-004 / L-008 / L-009 (snapshot-vs-reality):** those were about Unity API drift or single-spec mistakes (e.g., spec said `SetAsFirstSibling`, project's render order needed `SetAsLastSibling`). L-015 is about **cross-spec drift** — Spec N+5 references machinery from Spec N that Spec N+3 deleted. The newer spec author wrote against a mental model that hadn't been updated.
+
+**The fix:** before implementing a UX/component layer the spec references, GREP THE CURRENT REPO for the class/component the spec names. If it doesn't exist, find what replaced it and confirm the replacement with the user before coding. The replacement IS the right pattern — not the spec's words.
+
+```bash
+# Mid-flight before authoring §4.x:
+grep -r "class LockToggleHandler" Assets/_Project/Scripts/ # → 0 results
+# That zero result is the signal: the spec is referencing dead code. Stop and ask.
+```
+
+**When this applies:**
+- Any time a spec says "reuse component X from WS-NNN" — verify X still exists.
+- Any time a spec references a class/file by name in §4 — verify it exists before scene-wiring against it.
+- Especially when the spec is large (L-sized) and spans multiple subsystems that have evolved separately.
+
+**Pattern to copy** when starting any UI-touching spec:
+
+1. Search for every named component the spec references (`grep -r "class <name>" Assets/_Project/Scripts/`).
+2. If any return 0 results, flag with the user: "spec says use X, that doesn't exist — what replaced it?"
+3. For the replacement, find an existing usage site in the project (e.g., `InventoryGridView.RenderItem`) and use ITS pattern, not the spec's pattern.
+
+**Resist:** "the spec is detailed and lists specific component names — just attach them and see if they compile." The compile is the wrong gate — `TooltipTarget` compiles just fine, but it's the WRONG component on a 2026-05 ground item. The interaction model dictates which component to use, not the type system.
+
+**Resist:** "the spec's specific component reference IS the latest design intent — newer than the WS-012.1 changes." False: specs date themselves. The repo's current state IS the latest design intent. When they conflict, the repo wins.
+
+**Forward-looking memory:** [feedback_spec_references_pre_revision_components.md](feedback_spec_references_pre_revision_components.md) — grep before wiring, ask the user when a referenced class is missing.
+
+---
+
 ## Meta — when capturing a new lesson
 
 1. Number it (`L-NNN`) so future references stay stable.

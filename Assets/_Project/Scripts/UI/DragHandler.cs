@@ -155,7 +155,8 @@ namespace HellpitRampage.UI
             {
                 bool committed = TryCommitDrop();
                 if (committed) _dropCommitted = true;
-                if (!committed) ReturnToOriginal();
+                else if (TryDepositOnGround(eventData.position)) _dropCommitted = true;
+                else ReturnToOriginal();
             }
 
             _dragging = false;
@@ -163,6 +164,41 @@ namespace HellpitRampage.UI
             if (View != null) View.ResetCellHighlights();
 
             PublishDragEnded(wasCancelled: !_dropCommitted);
+        }
+
+        // WS-012.5: when the player drags a grid item out of its slot and drops it inside the
+        // backpack column but NOT on a valid cell, the item falls to the ground rather than
+        // reverting. Bags don't have a holding area — they always revert.
+        private bool TryDepositOnGround(Vector2 screenPos)
+        {
+            if (Kind != DraggableKind.Item) return false;
+            if (Item == null || Item.Data == null) return false;
+            if (GroundManager.Current == null) return false;
+            if (!DropZoneClassifier.IsWithinBackpackXRange(screenPos)) return false;
+
+            RectTransform groundRT = GroundManager.Current.GroundAreaRT;
+            if (groundRT == null) return false;
+
+            Vector2 groundLocal;
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(groundRT, screenPos, null, out groundLocal);
+
+            // Snapshot before removing — Item ref stays valid for the event publish post-deposit.
+            var data = Item.Data;
+            var rotation = _currentRotation;
+            bool isLocked = Item.IsLocked;
+
+            if (InventoryService.Instance == null) return false;
+            if (!InventoryService.Instance.RemoveItemSilent(Item)) return false;
+
+            GroundManager.Current.AddItem(data, rotation, isLocked, groundLocal, Vector2.zero);
+
+            // InventoryService.RemoveItemSilent is, well, silent — so InventoryGridView won't
+            // re-render to remove our stale visual. Publish ItemRemovedEvent explicitly so the
+            // grid view drops the now-orphan visual; the new ground visual is owned by GroundManager.
+            if (EventBus.Instance != null)
+                EventBus.Instance.Publish(new ItemRemovedEvent { Item = Item });
+
+            return true;
         }
 
         private void CancelDrag()

@@ -34,4 +34,18 @@ namespace HellpitRampage.Core
     public struct ItemDragEndedEvent : IGameEvent { public ItemInstance Item; public bool WasCancelled; }
     public struct BagDragBeganEvent : IGameEvent { public BagInstance Bag; }
     public struct BagDragEndedEvent : IGameEvent { public BagInstance Bag; public bool WasCancelled; }
+
+    // WS-012.5: drag mode toggle (Items vs Bags). When Items is active, bags grey out and
+    // ignore drag input; when Bags is active, items grey out. Eliminates the
+    // dragging-the-wrong-thing-by-accident failure mode.
+    public enum DragMode { Items, Bags }
+    public struct DragModeChangedEvent : IGameEvent { public DragMode NewMode; }
+
+    // WS-012.5: bag-sale outcome. Published AFTER bag removal + ground spill complete.
+    public struct BagSoldEvent : IGameEvent { public BagData BagData; public int ItemCountSpilled; }
+
+    // WS-012.5: ground-item lifecycle. Item is the wrapped ItemInstance so existing
+    // sell-modal / lock-toggle subscribers can treat ground items uniformly.
+    public struct GroundItemAddedEvent : IGameEvent { public ItemInstance Item; }
+    public struct GroundItemRemovedEvent : IGameEvent { public ItemInstance Item; }
 }

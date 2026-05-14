@@ -45,6 +45,17 @@ namespace HellpitRampage.Inventory
             return _bags.Remove(bag);
         }
 
+        // WS-012.5: removes the bag from the bag list but leaves any items whose HostBag
+        // pointed at it in place (orphaned). The bag-sale flow uses this AFTER it has
+        // already drained the in-bag items to the ground via RemoveItem; cascading
+        // removal here would be a no-op but the contract is explicit so future callers
+        // can rely on "bag only" semantics. Caller is responsible for the orphans.
+        public bool RemoveBagOnly(BagInstance bag)
+        {
+            if (bag == null) return false;
+            return _bags.Remove(bag);
+        }
+
         public BagInstance GetBagAt(Vector2Int cell)
         {
             foreach (var bag in _bags)

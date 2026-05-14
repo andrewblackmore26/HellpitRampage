@@ -30,12 +30,22 @@ namespace HellpitRampage.UI
         private readonly List<Image> _itemInstances = new();
         private bool _cellsBuilt;
 
+        // WS-012.5: alpha multipliers driven by DragModeService. Items mode → items full, bags 0.4;
+        // Bags mode → bags full, items 0.4. Applied in RenderItem/RenderBag and refreshed on toggle.
+        private float _itemAlpha = 1f;
+        private float _bagAlpha = 1f;
+        private bool _itemsInteractable = true;
+        private bool _bagsInteractable = true;
+
         public RectTransform GridParent => _gridParent;
         public int CellSizePx => CELL_SIZE_PX;
 
         private void OnEnable()
         {
             if (!_cellsBuilt) BuildCellGrid();
+            // WS-012.5: pull current mode at enable time so spawning into Bags mode greys out items.
+            if (DragModeService.Current != null)
+                ApplyDragMode(DragModeService.Current.CurrentMode);
             RefreshAll();
 
             if (EventBus.Instance != null)
@@ -48,6 +58,7 @@ namespace HellpitRampage.UI
                 EventBus.Instance.Subscribe<ItemMovedEvent>(HandleAnyChange);
                 EventBus.Instance.Subscribe<ItemLockChangedEvent>(HandleAnyChange);
                 EventBus.Instance.Subscribe<BagLockChangedEvent>(HandleAnyChange);
+                EventBus.Instance.Subscribe<DragModeChangedEvent>(HandleDragModeChanged);
             }
         }
 
@@ -63,10 +74,26 @@ namespace HellpitRampage.UI
                 EventBus.Instance.Unsubscribe<ItemMovedEvent>(HandleAnyChange);
                 EventBus.Instance.Unsubscribe<ItemLockChangedEvent>(HandleAnyChange);
                 EventBus.Instance.Unsubscribe<BagLockChangedEvent>(HandleAnyChange);
+                EventBus.Instance.Unsubscribe<DragModeChangedEvent>(HandleDragModeChanged);
             }
         }
 
         private void HandleAnyChange<T>(T _) where T : IGameEvent => RefreshAll();
+
+        private void HandleDragModeChanged(DragModeChangedEvent e)
+        {
+            ApplyDragMode(e.NewMode);
+            RefreshAll();
+        }
+
+        private void ApplyDragMode(DragMode mode)
+        {
+            bool itemsMode = mode == DragMode.Items;
+            _itemAlpha = itemsMode ? 1f : 0.4f;
+            _bagAlpha = itemsMode ? 0.4f : 1f;
+            _itemsInteractable = itemsMode;
+            _bagsInteractable = !itemsMode;
+        }
 
         private void BuildCellGrid()
         {
@@ -125,7 +152,8 @@ namespace HellpitRampage.UI
 
             Image bagImg = Instantiate(_bagPrefab, _gridParent);
             bagImg.name = $"Bag_{bag.Data.BagName}_{bag.InstanceID}";
-            bagImg.color = bag.Data.Icon == null ? _bagTintColor : Color.white;
+            Color baseBagColor = bag.Data.Icon == null ? _bagTintColor : Color.white;
+            bagImg.color = new Color(baseBagColor.r, baseBagColor.g, baseBagColor.b, baseBagColor.a * _bagAlpha);
             if (bag.Data.Icon != null) bagImg.sprite = bag.Data.Icon;
             bagImg.raycastTarget = true;
 
@@ -142,6 +170,7 @@ namespace HellpitRampage.UI
             handler.Bag = bag;
             handler.GridParent = _gridParent;
             handler.View = this;
+            handler.enabled = _bagsInteractable;
 
             // WS-012.1: left-click opens the detail tooltip; hover on grid bags does nothing.
             // Lock state is now toggled via the detail tooltip's lock button, not right-click.
@@ -178,7 +207,9 @@ namespace HellpitRampage.UI
             rootImg.name = $"Item_{item.Data.ItemName}_{item.InstanceID}";
             rootImg.color = new Color(0f, 0f, 0f, 0f);
             rootImg.sprite = null;
-            rootImg.raycastTarget = true;
+            // WS-012.5: in Bags mode, items must NOT intercept drag/drop events. Disable raycast
+            // on the root + cell children (set in BuildItemCellChildren via _itemAlpha visible test).
+            rootImg.raycastTarget = _itemsInteractable;
 
             RectTransform rt = rootImg.rectTransform;
             rt.anchorMin = rt.anchorMax = new Vector2(0, 0);
@@ -189,12 +220,16 @@ namespace HellpitRampage.UI
             rt.anchoredPosition = new Vector2(minX * CELL_SIZE_PX, minY * CELL_SIZE_PX);
 
             BuildItemCellChildren(rootImg.transform, effective, item.Data);
+            // WS-012.5: tint the per-cell children to match current mode alpha. BuildItemCellChildren
+            // sets the placeholder color at full alpha; multiply by _itemAlpha so Bags mode dims items.
+            ApplyItemAlphaToCellChildren(rootImg.transform);
 
             var handler = rootImg.gameObject.AddComponent<DragHandler>();
             handler.Kind = DragHandler.DraggableKind.Item;
             handler.Item = item;
             handler.GridParent = _gridParent;
             handler.View = this;
+            handler.enabled = _itemsInteractable;
 
             // WS-012.1: left-click opens the detail tooltip; hover on grid items does nothing.
             // Lock state is now toggled via the detail tooltip's lock button, not right-click.
@@ -240,6 +275,23 @@ namespace HellpitRampage.UI
                 img.color = data.PlaceholderColor;
                 if (data.Icon != null) img.sprite = data.Icon;
                 img.raycastTarget = false;
+            }
+        }
+
+        // WS-012.5: walk the per-cell child Images and multiply their alpha by _itemAlpha so
+        // Bags mode dims items uniformly. Called immediately after BuildItemCellChildren.
+        private void ApplyItemAlphaToCellChildren(Transform root)
+        {
+            if (root == null) return;
+            for (int i = 0; i < root.childCount; i++)
+            {
+                var child = root.GetChild(i);
+                if (child == null || child.name == null || !child.name.StartsWith("Cell_")) continue;
+                var img = child.GetComponent<Image>();
+                if (img == null) continue;
+                Color c = img.color;
+                c.a *= _itemAlpha;
+                img.color = c;
             }
         }
 

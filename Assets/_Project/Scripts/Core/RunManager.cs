@@ -72,7 +72,15 @@ namespace HellpitRampage.Core
             bool runEnding = CurrentRound >= _totalRounds;
 
             if (EventBus.Instance != null)
+            {
                 EventBus.Instance.Publish(new RoundEndedEvent { RoundNumber = CurrentRound });
+                // WS-012.5: explicit shop-phase signal. GoldFieldSweeper already cleans the field
+                // on RoundEndedEvent; ShopPhaseStartedEvent is for shop-only UI (GroundArea,
+                // DragModeService reset to Items) that needs to know "the shop is now open."
+                // Suppressed on the final round so RunEnd overlay isn't competing with a stale shop.
+                if (!runEnding)
+                    EventBus.Instance.Publish(new ShopPhaseStartedEvent { RoundNumber = CurrentRound });
+            }
 
             // Round-end gold reward, but only if the run continues. On the final round the run-end
             // overlay takes over, so awarding gold post-victory would refresh a dead shop.

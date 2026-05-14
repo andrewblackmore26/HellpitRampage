@@ -115,25 +115,51 @@ namespace HellpitRampage.UI
             if (_gridView != null) _gridView.ResetCellHighlights();
             if (_ghostInstance != null) { Destroy(_ghostInstance); _ghostInstance = null; _ghostRT = null; }
 
-            if (!IsDropValid()) return;
             if (InventoryService.Instance == null || RunManager.Instance == null) return;
+            if (_slot == null || _slot.CurrentOffer == null) return;
 
             int price = _slot.CurrentPrice;
-            if (!RunManager.Instance.SpendGold(price)) return;
+            if (RunManager.Instance.CurrentGold < price) return;
 
-            bool placed = false;
-            if (_draggedOffer is ItemData itemData)
-                placed = InventoryService.Instance.PlaceItem(itemData, _snappedOrigin, _currentRotation) != null;
-            else if (_draggedOffer is BagData bagData)
-                placed = InventoryService.Instance.PlaceBag(bagData, _snappedOrigin) != null;
-
-            if (!placed)
+            // 1) Valid grid cell: standard buy-and-place.
+            if (IsDropValid())
             {
-                RunManager.Instance.AddGold(price); // refund (defensive)
+                if (!RunManager.Instance.SpendGold(price)) return;
+
+                bool placed = false;
+                if (_draggedOffer is ItemData itemData)
+                    placed = InventoryService.Instance.PlaceItem(itemData, _snappedOrigin, _currentRotation) != null;
+                else if (_draggedOffer is BagData bagData)
+                    placed = InventoryService.Instance.PlaceBag(bagData, _snappedOrigin) != null;
+
+                if (!placed)
+                {
+                    RunManager.Instance.AddGold(price); // refund (defensive)
+                    return;
+                }
+
+                if (_shopController != null) _shopController.TakeOfferFromSlot(_slotIndex);
                 return;
             }
 
-            if (_shopController != null) _shopController.TakeOfferFromSlot(_slotIndex);
+            // 2) WS-012.5: drop in backpack column but on an invalid cell → buy and deposit to ground.
+            // Items only; bags don't go to ground (they have no holding area).
+            if (_draggedOffer is ItemData itemForGround
+                && GroundManager.Current != null
+                && DropZoneClassifier.IsWithinBackpackXRange(eventData.position))
+            {
+                if (!RunManager.Instance.SpendGold(price)) return;
+
+                Vector2 groundLocal;
+                RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                    GroundManager.Current.GroundAreaRT, eventData.position, null, out groundLocal);
+
+                GroundManager.Current.AddItem(itemForGround, _currentRotation, isLocked: false, groundLocal, Vector2.zero);
+                if (_shopController != null) _shopController.TakeOfferFromSlot(_slotIndex);
+                return;
+            }
+
+            // 3) Out-of-range or unsupported case: standard cancel (drag aborts, no gold change).
         }
 
         private void CancelDrag()

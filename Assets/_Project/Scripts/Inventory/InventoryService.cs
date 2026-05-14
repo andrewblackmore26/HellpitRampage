@@ -170,5 +170,44 @@ namespace HellpitRampage.Inventory
             }
             return true;
         }
+
+        // WS-012.5: returns the items currently parented to the given bag (HostBag == bag).
+        // Used by the bag-sale flow to capture the spill list BEFORE removing the bag, so the
+        // items can be re-spawned on the ground rather than destroyed.
+        public List<ItemInstance> GetItemsInBag(BagInstance bag)
+        {
+            var result = new List<ItemInstance>();
+            if (bag == null || Grid == null) return result;
+            foreach (var item in Grid.Items)
+                if (item.HostBag == bag) result.Add(item);
+            return result;
+        }
+
+        // WS-012.5: removes an item from the grid WITHOUT publishing ItemRemovedEvent.
+        // Used by the ground-deposit flow (DragHandler / ShopSlotDragHandler / SellModal bag spill)
+        // which publishes its own GroundItemAddedEvent — letting both fire would cause
+        // InventoryGridView to RefreshAll twice and briefly flash a missing item.
+        public bool RemoveItemSilent(ItemInstance item)
+        {
+            if (item == null) return false;
+            return Grid.RemoveItem(item);
+        }
+
+        // WS-012.5: removes a bag from the grid without touching items inside it. The
+        // bag-sale flow uses this AFTER it has captured the item list and re-homed each
+        // item to the ground via RemoveItemSilent — by the time this fires, no items
+        // reference the bag. Standard RemoveBag cascades item destruction; this variant
+        // is the explicit non-cascading path so the spill order (gold → spill → bag) is
+        // unambiguous.
+        public bool RemoveBagWithoutCascade(BagInstance bag)
+        {
+            if (bag == null || Grid == null) return false;
+            if (!Grid.RemoveBagOnly(bag)) return false;
+
+            if (EventBus.Instance != null)
+                EventBus.Instance.Publish(new BagRemovedEvent { Bag = bag });
+
+            return true;
+        }
     }
 }
