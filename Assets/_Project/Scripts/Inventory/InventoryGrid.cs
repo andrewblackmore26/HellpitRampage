@@ -193,6 +193,21 @@ namespace HellpitRampage.Inventory
         // Instance-method shim — spec §4.9 / §4.14 call this form. Delegates to the static check.
         public bool IsCellInBounds(Vector2Int cell) => IsInBounds(cell);
 
+        // ---------------- Preview-only helpers (WS-012.1 fix-pass) ----------------
+        // Direct mutation of the items list bypassing validation and event publishing. Intended
+        // ONLY for transient drag-preview overlay computation in StarIndicatorOverlay — the
+        // caller must guarantee a paired Remove inside a try/finally so the grid state stays
+        // consistent. Never use these for real placement; PlaceItem/RemoveItem own that path.
+        public void AddItemDirect(ItemInstance item)
+        {
+            if (item != null) _items.Add(item);
+        }
+
+        public bool RemoveItemDirect(ItemInstance item)
+        {
+            return item != null && _items.Remove(item);
+        }
+
         public void Clear()
         {
             _bags.Clear();

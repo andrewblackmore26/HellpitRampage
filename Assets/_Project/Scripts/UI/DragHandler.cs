@@ -19,6 +19,14 @@ namespace HellpitRampage.UI
         public RectTransform GridParent { get; set; }
         public InventoryGridView View { get; set; }
 
+        // WS-012.1 fix-pass: scene-wide accessor for the currently-active drag so observers
+        // (e.g., StarIndicatorOverlay) can preview the dragged item's effect on synergies
+        // each frame without subscribing to per-frame events. Cleared in OnEndDrag / CancelDrag.
+        public static DragHandler Active { get; private set; }
+        public ItemInstance CurrentItem => Kind == DraggableKind.Item ? Item : null;
+        public Vector2Int CurrentSnappedOrigin => _currentSnappedOrigin;
+        public Rotation CurrentRotation => _currentRotation;
+
         private RectTransform _rt;
         private CanvasGroup _canvasGroup;
         private Vector2 _originalAnchoredPos;
@@ -45,6 +53,7 @@ namespace HellpitRampage.UI
             if (Tooltip.Instance != null) Tooltip.Instance.Hide();
             _dragging = true;
             _dropCommitted = false;
+            Active = this;
             _originalAnchoredPos = _rt.anchoredPosition;
             _originalRotation = Kind == DraggableKind.Item && Item != null ? Item.Rotation : Rotation.Deg0;
             _currentRotation = _originalRotation;
@@ -150,6 +159,7 @@ namespace HellpitRampage.UI
             }
 
             _dragging = false;
+            if (Active == this) Active = null;
             if (View != null) View.ResetCellHighlights();
 
             PublishDragEnded(wasCancelled: !_dropCommitted);
@@ -161,6 +171,7 @@ namespace HellpitRampage.UI
             _canvasGroup.blocksRaycasts = true;
             ReturnToOriginal();
             _dragging = false;
+            if (Active == this) Active = null;
             if (View != null) View.ResetCellHighlights();
 
             // Cancel always counts as not-committed.

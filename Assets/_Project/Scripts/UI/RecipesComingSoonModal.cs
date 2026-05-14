@@ -39,6 +39,9 @@ namespace HellpitRampage.UI
         {
             EnsureBuilt();
             gameObject.SetActive(true);
+            // Render above the detail tooltip's panel: the tooltip's ShowPanelAtCursor calls
+            // SetAsLastSibling on its own panel, so without this we end up beneath it.
+            transform.SetAsLastSibling();
             if (_panelGO != null) _panelGO.transform.SetAsLastSibling();
         }
 

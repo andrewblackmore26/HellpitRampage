@@ -25,6 +25,15 @@ namespace HellpitRampage.UI
         private ScriptableObject _draggedOffer;
         private Rotation _currentRotation;
 
+        // WS-012.1 fix-pass: scene-wide accessor for the active shop drag so observers
+        // (e.g., StarIndicatorOverlay) can preview the dragged offer's effect on synergies
+        // before the item is actually purchased and placed. Distinct from DragHandler.Active
+        // since shop drags have no real ItemInstance yet — only a ScriptableObject offer.
+        public static ShopSlotDragHandler Active { get; private set; }
+        public ItemData CurrentItemData => _draggedOffer as ItemData;
+        public Vector2Int CurrentSnappedOrigin => _snappedOrigin;
+        public Rotation CurrentRotation => _currentRotation;
+
         public void OnBeginDrag(PointerEventData eventData)
         {
             if (_slot == null || _slot.IsSold || _slot.CurrentOffer == null) return;
@@ -34,6 +43,7 @@ namespace HellpitRampage.UI
             _dragging = true;
             _draggedOffer = _slot.CurrentOffer;
             _currentRotation = Rotation.Deg0;
+            Active = this;
 
             if (Tooltip.Instance != null) Tooltip.Instance.Hide();
 
@@ -76,12 +86,12 @@ namespace HellpitRampage.UI
         {
             if (!_dragging) return;
 
-            // R key rotation — items only (bags don't rotate, parity with WS-009 DragHandler).
-            if (_draggedOffer is ItemData && Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame)
-            {
-                _currentRotation = ShapeMath.Next(_currentRotation);
-                UpdateValidationOverlay();
-            }
+            // WS-012.1: R-key OR right-mouse-click rotates the dragged item 90° CW.
+            // Items only — bags have no rotation field on the data model (parity with DragHandler).
+            bool rotateRequested =
+                (Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame) ||
+                (Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame);
+            if (rotateRequested && _draggedOffer is ItemData) Rotate();
 
             // Escape cancel.
             if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
@@ -90,10 +100,17 @@ namespace HellpitRampage.UI
             }
         }
 
+        private void Rotate()
+        {
+            _currentRotation = ShapeMath.Next(_currentRotation);
+            UpdateValidationOverlay();
+        }
+
         public void OnEndDrag(PointerEventData eventData)
         {
             if (!_dragging) return;
             _dragging = false;
+            if (Active == this) Active = null;
 
             if (_gridView != null) _gridView.ResetCellHighlights();
             if (_ghostInstance != null) { Destroy(_ghostInstance); _ghostInstance = null; _ghostRT = null; }
@@ -122,6 +139,7 @@ namespace HellpitRampage.UI
         private void CancelDrag()
         {
             _dragging = false;
+            if (Active == this) Active = null;
             if (_gridView != null) _gridView.ResetCellHighlights();
             if (_ghostInstance != null) { Destroy(_ghostInstance); _ghostInstance = null; _ghostRT = null; }
             // No state change — slot remains available, no gold spent.

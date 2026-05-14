@@ -1745,3 +1745,105 @@ Spec: inline (provided 2026-05-15). Plan: `C:\Users\admin\.claude\plans\kind-ski
 
 Local commit on `main`. Push after designer playtest passes.
 
+
+---
+
+## Fix-pass (WS-012.1 follow-up — 2026-05-15)
+
+Two designer-reported bugs from initial implementation:
+
+### Bug 1 — Recipes-coming-soon modal renders BEHIND the detail tooltip
+
+**Root cause:** modal and detail panel are both children of `DetailTooltipController`. The tooltip calls `_panelRT.SetAsLastSibling()` in `ShowPanelAtCursor`, pushing the panel to the end of `m_Children`. The modal was added during `EnsureBuilt` BEFORE that resorting, so it ends up before the panel in sibling order → renders underneath.
+
+**Fix:** `RecipesComingSoonModal.Show()` now calls `transform.SetAsLastSibling()` on the modal itself, ensuring it lands AFTER the tooltip panel each time it's shown.
+
+[Assets/_Project/Scripts/UI/RecipesComingSoonModal.cs](Assets/_Project/Scripts/UI/RecipesComingSoonModal.cs#L40-L48)
+
+### Bug 2 — Whetstone stars don't follow during drag, don't light up live when matching item ghosts pass through their target cells
+
+**Root cause:** `StarIndicatorOverlay.Rebuild()` ran only on inventory/synergy events (place / remove / move / SynergyChangedEvent). During a drag, no event fires — the ghost moves visually but `item.Origin` only updates on a successful commit at `OnEndDrag`. Stars stayed pinned to the original committed position.
+
+**Fix (two-part):**
+
+1. `DragHandler` exposes a scene-wide `Active` accessor + read-only getters (`CurrentItem`, `CurrentSnappedOrigin`, `CurrentRotation`) so any observer can read the live ghost state without subscribing to per-frame events. Set in `OnBeginDrag`, cleared in both `OnEndDrag` and `CancelDrag`. [Assets/_Project/Scripts/UI/DragHandler.cs:22-28](Assets/_Project/Scripts/UI/DragHandler.cs#L22-L28)
+
+2. `StarIndicatorOverlay.Update()` polls `DragHandler.Active`. While a drag is active and the snapped origin/rotation changed since last frame, it runs a **preview rebuild**:
+   - Temporarily mutates the dragged item's `Origin` + `Rotation` to the ghost's snapped values.
+   - Calls `SynergyResolver.Resolve(grid)` against that hypothetical placement — pure function, no side effects, no event publishing.
+   - Renders stars from the preview `ActiveStars` set.
+   - Restores the item's original `Origin`/`Rotation` in a `finally`.
+   - On drag end (Active becomes null), reverts to the committed-state cache.
+   - Committed-state event handlers (HandleAnyChange) skip rebuild while `Active != null` so they don't fight the preview pass.
+
+[Assets/_Project/Scripts/UI/StarIndicatorOverlay.cs](Assets/_Project/Scripts/UI/StarIndicatorOverlay.cs)
+
+**Behavioral result:**
+- Dragging the **Whetstone**: its star renders at the snapped origin's target cell live. Lights up when a Weapon happens to sit at the new target cell.
+- Dragging a **Weapon** past a stationary Whetstone: the stationary Whetstone's star at the Weapon's preview position lights up live and dims when the cursor leaves.
+- Rotating the Whetstone mid-drag (R or right-click): star direction follows the new rotation immediately.
+
+**Why mutation-and-restore is safe:** `SynergyResolver.Resolve` is a pure read of `grid.Items` (no writes, no event publishing). HostBag is not read by Resolve, so leaving it stale during the preview is harmless. Mutation runs inside a `try/finally`, so even if Resolve threw, the item state would be restored. No new event types or per-frame messages — observers just read the static accessor and the resolver in the same frame.
+
+### Tests
+
+- NEW `Assets/_Project/Tests/EditMode/StarPreviewTests.cs` — 2 tests pinning the mutation-and-resolve pattern:
+  - Dragging a weapon into a starred item's target cell activates that star in the preview.
+  - Dragging a starred item next to a stationary matching tag activates its (now relocated) star.
+  - Both tests verify the item's original Origin/Rotation are restored after the preview.
+- Test count: 85 → **87** (RotationTests=5, CanvasClampTests=6, StarPreviewTests=2 in this round).
+
+### Files touched
+
+- `Assets/_Project/Scripts/UI/RecipesComingSoonModal.cs` — modal `Show()` now self-promotes to last sibling.
+- `Assets/_Project/Scripts/UI/DragHandler.cs` — static `Active` accessor + `CurrentItem`/`CurrentSnappedOrigin`/`CurrentRotation` getters; set/cleared at drag boundaries.
+- `Assets/_Project/Scripts/UI/StarIndicatorOverlay.cs` — preview-driven `Update`; committed-state event handlers skip while drag is live.
+- `Assets/_Project/Tests/EditMode/StarPreviewTests.cs` + meta (new).
+
+### Verification status
+
+- Compile: not run — agent has no Unity pipeline. All new code uses existing APIs (`SynergyResolver.Resolve`, `grid.Items`, item field mutation) the same way existing tests exercise them.
+- Tests: target **87 passing** (designer must run Test Runner).
+- Playtest: designer to verify the three behaviors listed above + the modal-on-top fix.
+
+---
+
+## Shop-drag parity (WS-012.1 third fix-pass — 2026-05-15)
+
+Designer reported: stars and right-click rotation work for grid drags but NOT for shop drags (dragging an item from a shop slot before purchase).
+
+**Root cause:** the shop uses a separate `ShopSlotDragHandler` script (not the grid's `DragHandler`). It:
+- Only listened for R-key, not right-click.
+- Had no static accessor for the active drag, so `StarIndicatorOverlay` couldn't see it.
+- Drags a `ScriptableObject` offer (`ItemData`) rather than a real `ItemInstance` — so the preview path needed a new shape (can't just mutate Origin on an item that doesn't exist yet).
+
+**Fixes:**
+
+1. **Right-click rotation** — [ShopSlotDragHandler.cs:79-95](Assets/_Project/Scripts/UI/ShopSlotDragHandler.cs#L79-L95) now polls both R-key and right-mouse-button via `wasPressedThisFrame`, routing both into a shared `Rotate()` helper. Items-only gating preserved (bags don't rotate).
+
+2. **Static `Active` accessor** — [ShopSlotDragHandler.cs:27-37](Assets/_Project/Scripts/UI/ShopSlotDragHandler.cs#L27-L37) exposes `Active`, `CurrentItemData` (cast of `_draggedOffer` to `ItemData`), `CurrentSnappedOrigin`, `CurrentRotation`. Set in `OnBeginDrag`, cleared in both `OnEndDrag` and `CancelDrag` (BEFORE `PlaceItem` fires events so `HandleAnyChange` runs cleanly after a successful purchase).
+
+3. **Preview-only grid helpers** — [InventoryGrid.cs:196-209](Assets/_Project/Scripts/Inventory/InventoryGrid.cs#L196-L209) adds `AddItemDirect` / `RemoveItemDirect` that mutate `_items` without validation or events. The doc comment is explicit: never use for real placement.
+
+4. **Shop-drag preview path** — [StarIndicatorOverlay.cs:198-234](Assets/_Project/Scripts/UI/StarIndicatorOverlay.cs#L198-L234) `RebuildWithShopDragPreview` synthesizes a transient `ItemInstance` (sentinel ID = `int.MinValue` to dodge collision with the grid's running `_nextInstanceID`) from the offer's `ItemData`, slots it via `AddItemDirect`, calls `Resolve`, then `RemoveItemDirect` in a `finally`. The synthetic is reused across frames so cursor moves don't allocate. `HandleAnyChange` now skips when EITHER `DragHandler.Active` or `ShopSlotDragHandler.Active` is non-null. Update branches on the active drag source.
+
+**Behavioral result:**
+
+- Dragging a Whetstone offer from the shop: its star renders at the snapped origin's target cell and lights up live when an owned matching tag is in that cell.
+- Dragging a Weapon offer from the shop past a stationary owned Whetstone: the Whetstone's star lights up live as the Weapon ghost passes through its target cell.
+- R-key OR right-click during a shop drag rotates the offer 90° CW (with cell-highlight validation refresh).
+- Drop committing the purchase: `PlaceItem` fires `ItemPlacedEvent` → `SynergyService.Recompute` → `SynergyChangedEvent` → `StarIndicatorOverlay.HandleAnyChange` (both Actives null now) → committed-state rebuild renders correct stars for the now-placed item.
+
+**Files touched:**
+- `Assets/_Project/Scripts/UI/ShopSlotDragHandler.cs` — right-click + static Active.
+- `Assets/_Project/Scripts/Inventory/InventoryGrid.cs` — preview-only direct add/remove.
+- `Assets/_Project/Scripts/UI/StarIndicatorOverlay.cs` — shop-drag branch + synthetic-item path.
+
+**Verification status:**
+- Compile: not run — agent has no Unity pipeline. All new code uses existing patterns (`wasPressedThisFrame`, `new ItemInstance(...)` constructor with the same signature as `InventoryGrid.PlaceItem`).
+- Tests: existing 87 still apply; no new test added — the synthetic-item mechanism is exercised by the same resolver code paths covered in `StarPreviewTests` (mutate-and-resolve vs. add-and-resolve are both read-only over `grid.Items`).
+- Playtest: designer to verify the four behaviors listed above.
+
+**Subtle invariants relied on:**
+- `SynergyResolver.Resolve` is a pure read of `grid.Items` — no event publishing, no writes. If that ever changes, the preview-add/remove pattern needs reconsideration.
+- `InstanceID = int.MinValue` doesn't collide with `_nextInstanceID` (always positive, starts at 1, increments per real placement). The synthetic only exists inside the try/finally so even an ID collision wouldn't survive into committed state.
