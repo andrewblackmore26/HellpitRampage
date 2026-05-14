@@ -11,6 +11,10 @@ namespace HellpitRampage.Inventory
         public BagInstance HostBag;
         public Rotation Rotation;
 
+        // WS-012: per-instance lock. Toggled via InventoryService.ToggleItemLock.
+        // Locked items cannot be sold via the sell modal; positional moves are still allowed.
+        public bool IsLocked;
+
         public ItemInstance(int id, ItemData data, Vector2Int origin, BagInstance hostBag, Rotation rotation = Rotation.Deg0)
         {
             InstanceID = id;

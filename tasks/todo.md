@@ -1456,3 +1456,77 @@ Full plan: `C:\Users\admin\.claude\plans\serene-leaping-ladybug.md`.
 - **Risk**: Scene YAMLs were hand-authored using verified built-in script GUIDs from `Library/PackageCache/com.unity.ugui@473409526770/` and `com.unity.inputsystem@21a28c3a6c83/`. The camera and scene-defaults blocks were modeled byte-for-byte on `Assets/Settings/Scenes/URP2DSceneTemplate.unity`. Cannot verify with the editor from this environment — designer Play-test in Boot scene is the final gate.
 - **TMP avoided on purpose**: spec asks for "TextMeshPro - Text (UI)" but used legacy `UI.Text` for placeholder to avoid the first-open TMP Essentials import prompt. TMP can be adopted in a later workstream once the editor opens cleanly. Acceptance criteria item 2.b in the spec ("`TextMeshPro - Text (UI)` element") is the one explicit deviation.
 - **Namespace**: spec says `SanctuaryBound.Core`; used `HellpitRampage.Core` per the designer's confirmation that the current working title is Hellpit Rampage.
+
+---
+
+# Active task: WS-012 — Item & Bag Locking + Item Selling via Sell Modal
+
+Spec: `WS-012_Locking_Selling_via_Modal.md` (provided inline 2026-05-15).
+
+## Pre-flight (verified)
+
+- Post-WS-011.5 v3 state: 83 tests passing per most recent commit `16b20a2` (spec assumed 79; using 83 as baseline).
+- `GoldPickup.cs` uses `_isDespawned`, not the spec's `_isCollectible`. Adapt: `ForceCollect` checks `_isDespawned`, adds gold, calls `Despawn()`.
+- `ItemInstance` / `BagInstance` are mutable classes with positional constructors. Adding `IsLocked` field (default false) — no constructor change needed.
+- `Grid.Items` is `IReadOnlyList<ItemInstance>`. `ContainsItem` will iterate (List doesn't expose Contains directly here).
+- `DragHandler` has a `CancelDrag` (Escape) path. Must publish ended event there too.
+- ShopOverlayPanel is `fileID: 1800` / RectTransform `1801`. Add SellModal as its 5th child.
+- Max scene fileID currently 3673. New SellModal nodes use 3700-3799; GoldFieldSweeper uses 3800+.
+- Verifying "gold persists between rounds" is impossible without Play mode; pre-spec fix is mandatory per spec §0.3.
+
+## Plan (ordered, compile-safe)
+
+1. [ ] **Pre-spec fix (gold auto-vacuum)**
+   - Add `GoldPickup.ForceCollect()` (public): if `_isDespawned` return; else AddGold + Despawn.
+   - Create `Combat/GoldFieldSweeper.cs` subscribing to `RoundEndedEvent`, calls `ForceCollect()` on all active `GoldPickup`s via `FindObjectsByType<GoldPickup>()` (no SortMode arg per L-004).
+   - Wire empty `GoldFieldSweeper` GameObject in `Game.unity` (scene root).
+   - **Commit 1**: `[WS-012 pre-fix] Gold auto-vacuum at round end`.
+
+2. [ ] **Data + events**
+   - `ItemInstance.IsLocked` + `BagInstance.IsLocked` (default false).
+   - In `InventoryEvents.cs`: add `ItemLockChangedEvent`, `BagLockChangedEvent`, `ItemDragBeganEvent`, `ItemDragEndedEvent`, `BagDragBeganEvent`, `BagDragEndedEvent`.
+
+3. [ ] **InventoryService toggles + ContainsItem**
+   - `ToggleItemLock` / `ToggleBagLock` publish events.
+   - `ContainsItem(ItemInstance)` iterates `Grid.Items`.
+
+4. [ ] **DragHandler events**
+   - Track `_dropCommitted` flag, reset in `OnBeginDrag`, set in successful drop paths.
+   - Publish `ItemDragBeganEvent`/`BagDragBeganEvent` after ghost setup in `OnBeginDrag`.
+   - Publish `ItemDragEndedEvent`/`BagDragEndedEvent` (with `WasCancelled` = !_dropCommitted) at end of `OnEndDrag` AND in `CancelDrag`.
+   - `OnEndDrag` defensive check: if item was sold (no longer in inventory), skip revert.
+
+5. [ ] **Lock icon sprite asset**
+   - Create `Sprites/UI/lock_icon.png` (16×16 placeholder) and `.meta`.
+
+6. [ ] **LockToggleHandler**
+   - New script in `UI/`. `IPointerClickHandler` checks `button == Right`, `!dragging`, calls service.
+
+7. [ ] **InventoryGridView**
+   - SerializeField `_lockIconSprite`.
+   - `AttachLockIcon` helper.
+   - `RenderItem`/`RenderBag` add `LockToggleHandler` and call `AttachLockIcon` if locked.
+   - Subscribe to `ItemLockChangedEvent` / `BagLockChangedEvent`, refresh on change.
+
+8. [ ] **SellModal**
+   - New script. Subscribes to `ItemDragBeganEvent`/`ItemDragEndedEvent`.
+   - `OnDrop` checks `_currentLocked`; if unlocked, removes item + adds gold via `Mathf.CeilToInt(EffectivePrice * 0.5f)`.
+
+9. [ ] **Game.unity wiring**
+   - Add `SellModal` empty GameObject under ShopOverlayPanel (fileID 3700 range).
+   - Add `SellModal/Panel` (Image, RGBA 0,0,0,0.7, raycastTarget=1, anchor-stretch).
+   - Add `SellModal/Panel/Label` (Text, 36pt, centered, white).
+   - Wire SellModal `_panel` and `_label` SerializeFields.
+   - Panel initial state: m_IsActive=0.
+   - Add ShopOverlayPanel's m_Children to include the new SellModal RectTransform.
+   - Add `GoldFieldSweeper` GameObject (root, fileID 3800 range).
+   - Wire `InventoryGridView._lockIconSprite` to lock_icon.png.
+
+10. [ ] **Tests**
+    - `Tests/EditMode/SellMathTests.cs` (3 tests: 1g/3g/10g sell math).
+    - `Tests/EditMode/ItemLockTests.cs` (5 tests: toggle item, toggle bag, item publishes event, bag publishes event, null-item-safe).
+    - Final target: **83 + 8 = 91 tests passing**.
+
+11. [ ] **Verify & commit**
+    - Commit 1 (pre-fix), Commit 2 (main spec).
+    - Push to `main` (only after explicit user OK per workflow safety).

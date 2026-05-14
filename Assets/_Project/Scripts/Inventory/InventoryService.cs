@@ -121,6 +121,34 @@ namespace HellpitRampage.Inventory
             return true;
         }
 
+        // WS-012: lock toggles. Publishes the corresponding *LockChangedEvent on success.
+        // Null-tolerant so right-click handlers don't need to defensively guard.
+        public void ToggleItemLock(ItemInstance item)
+        {
+            if (item == null) return;
+            item.IsLocked = !item.IsLocked;
+            if (EventBus.Instance != null)
+                EventBus.Instance.Publish(new ItemLockChangedEvent { Item = item });
+        }
+
+        public void ToggleBagLock(BagInstance bag)
+        {
+            if (bag == null) return;
+            bag.IsLocked = !bag.IsLocked;
+            if (EventBus.Instance != null)
+                EventBus.Instance.Publish(new BagLockChangedEvent { Bag = bag });
+        }
+
+        // WS-012: helper for DragHandler's "did my item get sold mid-drop" defensive check.
+        // The sell modal removes the item during OnDrop, which fires before DragHandler.OnEndDrag.
+        public bool ContainsItem(ItemInstance item)
+        {
+            if (item == null || Grid == null) return false;
+            foreach (var i in Grid.Items)
+                if (i == item) return true;
+            return false;
+        }
+
         public bool MoveItem(ItemInstance item, Vector2Int newOrigin, Rotation newRotation)
         {
             if (item == null) return false;

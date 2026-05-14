@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using HellpitRampage.Core;
 using HellpitRampage.Inventory;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -26,6 +27,10 @@ namespace HellpitRampage.UI
         private bool _dragging;
         private Vector2Int _currentSnappedOrigin;
         private Rotation _currentRotation;
+        // WS-012: tracks whether the current drag committed (move/sell) or was cancelled.
+        // Flipped to true in TryCommitDrop success paths AND by sell-modal removal detection.
+        // Published on the *DragEndedEvent so subscribers (SellModal, future spillover) know intent.
+        private bool _dropCommitted;
 
         private void Awake()
         {
@@ -39,6 +44,7 @@ namespace HellpitRampage.UI
             if (_rt == null) return;
             if (Tooltip.Instance != null) Tooltip.Instance.Hide();
             _dragging = true;
+            _dropCommitted = false;
             _originalAnchoredPos = _rt.anchoredPosition;
             _originalRotation = Kind == DraggableKind.Item && Item != null ? Item.Rotation : Rotation.Deg0;
             _currentRotation = _originalRotation;
@@ -52,6 +58,16 @@ namespace HellpitRampage.UI
 
             _currentSnappedOrigin = CursorToSnappedOrigin(eventData.position);
             UpdateValidationOverlay();
+
+            // WS-012: publish AFTER ghost setup so SellModal activating immediately sees a valid drag.
+            // Item drags vs bag drags use distinct events — SellModal only consumes ItemDragBeganEvent.
+            if (EventBus.Instance != null)
+            {
+                if (Kind == DraggableKind.Item && Item != null)
+                    EventBus.Instance.Publish(new ItemDragBeganEvent { Item = Item });
+                else if (Kind == DraggableKind.Bag && Bag != null)
+                    EventBus.Instance.Publish(new BagDragBeganEvent { Bag = Bag });
+            }
         }
 
         public void OnDrag(PointerEventData eventData)
@@ -88,11 +104,27 @@ namespace HellpitRampage.UI
             _canvasGroup.alpha = 1f;
             _canvasGroup.blocksRaycasts = true;
 
-            bool committed = TryCommitDrop();
-            if (!committed) ReturnToOriginal();
+            // WS-012: if SellModal.OnDrop already removed this item, skip revert / move attempt.
+            // OnDrop fires BEFORE OnEndDrag, so the item may no longer be in the inventory.
+            bool soldOut = Kind == DraggableKind.Item
+                           && Item != null
+                           && InventoryService.Instance != null
+                           && !InventoryService.Instance.ContainsItem(Item);
+            if (soldOut)
+            {
+                _dropCommitted = true;
+            }
+            else
+            {
+                bool committed = TryCommitDrop();
+                if (committed) _dropCommitted = true;
+                if (!committed) ReturnToOriginal();
+            }
 
             _dragging = false;
             if (View != null) View.ResetCellHighlights();
+
+            PublishDragEnded(wasCancelled: !_dropCommitted);
         }
 
         private void CancelDrag()
@@ -102,6 +134,20 @@ namespace HellpitRampage.UI
             ReturnToOriginal();
             _dragging = false;
             if (View != null) View.ResetCellHighlights();
+
+            // Cancel always counts as not-committed.
+            PublishDragEnded(wasCancelled: true);
+        }
+
+        // WS-012: publish drag-ended event. Item path may also flow through here when the item
+        // was sold during OnDrop (Item is still our cached reference even after removal from grid).
+        private void PublishDragEnded(bool wasCancelled)
+        {
+            if (EventBus.Instance == null) return;
+            if (Kind == DraggableKind.Item && Item != null)
+                EventBus.Instance.Publish(new ItemDragEndedEvent { Item = Item, WasCancelled = wasCancelled });
+            else if (Kind == DraggableKind.Bag && Bag != null)
+                EventBus.Instance.Publish(new BagDragEndedEvent { Bag = Bag, WasCancelled = wasCancelled });
         }
 
         private void ReturnToOriginal()

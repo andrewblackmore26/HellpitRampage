@@ -15,6 +15,8 @@ namespace HellpitRampage.UI
         [SerializeField] private Image _cellPrefab;
         [SerializeField] private Image _bagPrefab;
         [SerializeField] private Image _itemPrefab;
+        // WS-012: lock-icon overlay applied to locked items/bags. 16×16, top-left of bounding box.
+        [SerializeField] private Sprite _lockIconSprite;
 
         [Header("Style")]
         [SerializeField] private Color _emptyCellColor = new(0.15f, 0.15f, 0.18f, 1f);
@@ -45,6 +47,8 @@ namespace HellpitRampage.UI
                 EventBus.Instance.Subscribe<ItemRemovedEvent>(HandleAnyChange);
                 EventBus.Instance.Subscribe<BagMovedEvent>(HandleAnyChange);
                 EventBus.Instance.Subscribe<ItemMovedEvent>(HandleAnyChange);
+                EventBus.Instance.Subscribe<ItemLockChangedEvent>(HandleAnyChange);
+                EventBus.Instance.Subscribe<BagLockChangedEvent>(HandleAnyChange);
             }
         }
 
@@ -58,6 +62,8 @@ namespace HellpitRampage.UI
                 EventBus.Instance.Unsubscribe<ItemRemovedEvent>(HandleAnyChange);
                 EventBus.Instance.Unsubscribe<BagMovedEvent>(HandleAnyChange);
                 EventBus.Instance.Unsubscribe<ItemMovedEvent>(HandleAnyChange);
+                EventBus.Instance.Unsubscribe<ItemLockChangedEvent>(HandleAnyChange);
+                EventBus.Instance.Unsubscribe<BagLockChangedEvent>(HandleAnyChange);
             }
         }
 
@@ -138,8 +144,14 @@ namespace HellpitRampage.UI
             handler.GridParent = _gridParent;
             handler.View = this;
 
+            var lockHandler = bagImg.gameObject.AddComponent<LockToggleHandler>();
+            lockHandler.Kind = LockToggleHandler.TargetKind.Bag;
+            lockHandler.Bag = bag;
+
             var tt = bagImg.gameObject.AddComponent<TooltipTarget>();
             tt.Bag = bag.Data;
+
+            if (bag.IsLocked) AttachLockIcon(bagImg.transform);
 
             _bagInstances.Add(bagImg);
         }
@@ -179,11 +191,41 @@ namespace HellpitRampage.UI
             handler.GridParent = _gridParent;
             handler.View = this;
 
+            var lockHandler = itemImg.gameObject.AddComponent<LockToggleHandler>();
+            lockHandler.Kind = LockToggleHandler.TargetKind.Item;
+            lockHandler.Item = item;
+
             var tt = itemImg.gameObject.AddComponent<TooltipTarget>();
             tt.Item = item.Data;
             tt.ItemInstance = item;
 
+            if (item.IsLocked) AttachLockIcon(itemImg.transform);
+
             _itemInstances.Add(itemImg);
+        }
+
+        // WS-012: small lock icon at the top-left of the locked item/bag's bounding box.
+        // Parented to the item/bag Image so it auto-renders above the body but below
+        // the star overlay siblings added by InventoryGridView (which are added later in the parent).
+        private void AttachLockIcon(Transform parent)
+        {
+            if (_lockIconSprite == null)
+            {
+                Debug.LogWarning("[InventoryGridView] _lockIconSprite is not assigned; locked items will render without an icon.");
+                return;
+            }
+
+            GameObject lockGO = new GameObject("LockIcon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            lockGO.transform.SetParent(parent, false);
+            var lockImg = lockGO.GetComponent<Image>();
+            lockImg.sprite = _lockIconSprite;
+            lockImg.raycastTarget = false;
+            var lockRT = (RectTransform)lockGO.transform;
+            lockRT.anchorMin = new Vector2(0f, 1f);
+            lockRT.anchorMax = new Vector2(0f, 1f);
+            lockRT.pivot = new Vector2(0f, 1f);
+            lockRT.sizeDelta = new Vector2(16f, 16f);
+            lockRT.anchoredPosition = new Vector2(4f, -4f);
         }
 
         public void HighlightCellsValid(IEnumerable<Vector2Int> cells)

@@ -679,6 +679,151 @@ The user's answer collapses the search space. The two follow-up specs were colla
 
 ---
 
+## L-012 — `IDropHandler.OnDrop` fires before the dragged element's `OnEndDrag`
+
+**Surfaced during:** WS-012 implementation (preempted — caught during code review, not via playtest crash).
+
+**The mistake (averted):** when authoring `SellModal.OnDrop`, I initially considered calling
+`RemoveItem` directly and letting `DragHandler.OnEndDrag` run its standard "commit drop or
+revert" logic afterwards. Unity's UI EventSystem invokes drop callbacks in this order on
+the frame the player releases the mouse:
+
+1. `IDropHandler.OnDrop` on the drop target (here: SellModal) — the dragged element is
+   still tracked by the EventSystem, but the target gets first crack at consuming the drop.
+2. `IEndDragHandler.OnEndDrag` on the dragged element (here: DragHandler).
+
+If the modal removes the item from `InventoryService` in step 1, then in step 2
+`DragHandler.TryCommitDrop` calls `InventoryService.MoveItem(Item, _currentSnappedOrigin, _currentRotation)`
+on an item that no longer exists in the grid — `Grid.MoveItem` returns false, and the
+revert path tries to `_rt.anchoredPosition = _originalAnchoredPos` on a GameObject that
+the next `RefreshAll()` is about to destroy. The visual ghost flashes back to origin for
+one frame before the grid rebuild deletes it.
+
+The worst case: if any code path between the two events touches `Item.HostBag` or other
+fields, you get NREs because removal can leave hostBag references stale.
+
+**The fix:** `DragHandler.OnEndDrag` checks the inventory state defensively before
+attempting any commit/revert. If the item is gone, treat it as already committed:
+
+```csharp
+public void OnEndDrag(PointerEventData eventData)
+{
+    if (!_dragging) return;
+    _canvasGroup.alpha = 1f;
+    _canvasGroup.blocksRaycasts = true;
+
+    bool soldOut = Kind == DraggableKind.Item
+                   && Item != null
+                   && InventoryService.Instance != null
+                   && !InventoryService.Instance.ContainsItem(Item);
+    if (soldOut)
+    {
+        _dropCommitted = true;        // SellModal already handled it; do nothing here.
+    }
+    else
+    {
+        bool committed = TryCommitDrop();
+        if (committed) _dropCommitted = true;
+        if (!committed) ReturnToOriginal();
+    }
+    // ...
+}
+```
+
+The `InventoryService.ContainsItem(ItemInstance)` helper exists specifically for this
+check — a one-method "is this still tracked?" query so callers don't have to crawl
+`Grid.Items` themselves.
+
+**When this applies:**
+
+- Any `IDropHandler` that mutates state the dragged element's `OnEndDrag` will then read.
+- Most common with selling, discarding, trashing, banishing — anywhere a drop target
+  removes the dragged item.
+- DOES NOT apply if the drop target only modifies the target's own state (e.g., a slot
+  that accepts the item without removing it from the source).
+
+**Pattern to copy** when authoring a destructive `IDropHandler`:
+
+1. Document the OnDrop → OnEndDrag order in a comment near OnDrop.
+2. Make the drag handler's revert path defensive: check inventory containment before
+   touching `Item.HostBag` / cell positions.
+3. Order operations in `OnDrop` so removal happens **before** any economic side-effect
+   (gold grant, etc.) — if removal fails, no compensation is paid out. Mirrored in
+   `SellModal.OnDrop`: `RemoveItem` first, then `AddGold`.
+
+**Resist:** "swap the order so OnEndDrag runs first." You can't — the EventSystem
+dispatches in target-then-source order and there's no public hook to reverse it.
+Defensive checks on the source side are the correct shape.
+
+**Resist:** "set `_dragging = false` in `OnDrop` so `OnEndDrag` early-returns." Tempting
+but conflates two concepts (drag-in-progress vs. drag-finalized-by-someone-else) and
+breaks the existing cell-highlight reset path in `OnEndDrag`. The containment check is
+the cleaner signal.
+
+---
+
+## L-013 — Built-in PNG sub-asset reference uses `fileID: 21300000`, not the .meta's GUID-only field
+
+**Surfaced during:** WS-012 scene wiring (preempted — confirmed by reading an existing
+sprite reference before writing the new one).
+
+**The mistake (averted):** when wiring `InventoryGridView._lockIconSprite` to the new
+`lock_icon.png`, the temptation was to copy only the GUID from the .meta and write:
+
+```yaml
+_lockIconSprite: {guid: e2f30415263748596a7b8c9d0e1f2a99, type: 3}
+```
+
+That's how `_cellPrefab`/`_bagPrefab` look in the existing scene wiring — they reference
+prefab root anchors (fileID 5400000000000000004 etc.) where the fileID is the prefab's
+internal anchor. For a *Sprite* sub-asset of a `TextureImporter`-imported PNG, the
+fileID is **always** `21300000` (Unity's canonical fileID for the auto-generated
+single Sprite that a TextureImporter emits when `spriteMode: 1`).
+
+If you omit the fileID or use 0, Unity treats the reference as the entire PNG asset
+(TextureImporter root, not Sprite sub-asset) and the SerializeField stays null at
+runtime. `InventoryGridView.AttachLockIcon` then logs the placeholder warning and
+no icon renders. The bug is silent — no exception, just missing UI.
+
+**The fix:** scene reference to a single-sprite PNG asset uses the full triple:
+
+```yaml
+_lockIconSprite: {fileID: 21300000, guid: <png-meta-guid>, type: 3}
+```
+
+Where:
+- `fileID: 21300000` — Unity's fixed ID for the implicit Sprite sub-asset of a
+  TextureImporter with `spriteMode: 1` (Single).
+- `guid:` — the PNG's `.meta` guid.
+- `type: 3` — script/asset type 3 means "asset reference."
+
+Verify by `grep`ing an existing sprite reference in the project (e.g.,
+`Enemy.prefab`'s `m_Sprite` line) and copying the shape.
+
+**When this applies:**
+
+- Any new SerializeField of type `Sprite` wired in a `.unity` or `.prefab` YAML by hand.
+- DOES NOT apply to multi-sprite atlases — those have multiple sub-anchors per the
+  sprite sheet, each with its own `internalID` listed in the `.meta`'s `sprites:` array.
+- DOES NOT apply to references to the entire `Texture2D` (e.g., a material's
+  `_MainTex`) — that uses fileID `2800000`.
+
+**Pattern to copy** when adding a sprite asset reference in scene YAML:
+
+```yaml
+# Single-sprite PNG (Single Sprite Mode):
+_someSprite: {fileID: 21300000, guid: <png-meta-guid>, type: 3}
+
+# Multi-sprite atlas — use the internalID from the .meta's spriteSheet.sprites list:
+_atlasSprite: {fileID: <internalID-of-named-sprite>, guid: <png-meta-guid>, type: 3}
+```
+
+**Resist:** "copy the prefab's fileID shape (5XX...004)." Prefab anchors are
+hand-authored or hash-derived (see L-003). Sprite sub-asset anchors are Unity-fixed
+constants. Don't conflate them.
+
+---
+
 ## Meta — when capturing a new lesson
 
 1. Number it (`L-NNN`) so future references stay stable.
