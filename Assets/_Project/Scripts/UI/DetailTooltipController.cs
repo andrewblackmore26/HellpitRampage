@@ -55,6 +55,13 @@ namespace HellpitRampage.UI
         private bool _built;
         private bool _eventsSubscribed;
 
+        /// <summary>
+        /// The grid item this tooltip is currently showing (null when the tooltip is hidden
+        /// or showing a bag). Read by <see cref="StarIndicatorOverlay"/> to render star
+        /// indicators for the clicked starred item.
+        /// </summary>
+        public ItemInstance ShownItem => _currentItem;
+
         private void Awake()
         {
             Current = this;

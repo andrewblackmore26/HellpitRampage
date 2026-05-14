@@ -7,14 +7,16 @@ using UnityEngine.UI;
 namespace HellpitRampage.UI
 {
     /// <summary>
-    /// v3: stars hover IN the target cell (the cell that, if occupied by a matching-tag neighbor,
-    /// would activate one of the starred item's conditional effects). Dim when no valid neighbor
-    /// is present; bright gold when active. Larger size (32×32) than v2's edge-midpoint stars.
+    /// Renders star indicators for a single "focused" starred item — the one currently being
+    /// dragged (grid or shop) or whose detail tooltip is open. Stars are dim when their target
+    /// cell has no matching neighbor and bright gold when active. Hidden entirely when no
+    /// starred item is focused (WS-012.1 third fix-pass: stars are NOT shown ambiently).
     ///
-    /// WS-012.1 fix-pass: while a drag is active, stars rebuild every frame against a PREVIEW
-    /// state that overlays the dragged item at its current snapped origin + rotation. This
-    /// makes a Whetstone's stars follow it during a drag, and makes any stationary starred
-    /// item's stars light up live as a matching weapon ghost passes through their target cell.
+    /// Focus priority each frame:
+    ///   1. Grid drag (DragHandler.Active) of an owned starred item → preview at snapped origin.
+    ///   2. Shop drag (ShopSlotDragHandler.Active) of an unbought starred offer → preview via
+    ///      a synthetic ItemInstance slotted into the grid for the resolver call.
+    ///   3. Detail tooltip open on a starred item → committed-state stars at the item's origin.
     /// </summary>
     public class StarIndicatorOverlay : MonoBehaviour
     {
@@ -32,10 +34,10 @@ namespace HellpitRampage.UI
 
         private readonly List<GameObject> _starInstances = new();
 
-        // Drag-preview bookkeeping — invalidates the cached "I already rendered this" snapshot
-        // when the drag's snapped origin or rotation changes. Tracks both grid drags (DragHandler)
-        // and shop drags (ShopSlotDragHandler) so unbought item drags get the same preview.
-        private object _trackedDrag;          // either DragHandler or ShopSlotDragHandler
+        // Tracks the last-rendered focus so we don't rebuild every frame when nothing has changed.
+        // `_focusSource` is one of: a DragHandler, a ShopSlotDragHandler, the DetailTooltipController, or null.
+        private object _focusSource;
+        private ItemInstance _focusItem;
         private Vector2Int _lastPreviewOrigin;
         private Rotation _lastPreviewRotation;
 
@@ -54,7 +56,7 @@ namespace HellpitRampage.UI
                 EventBus.Instance.Subscribe<ItemMovedEvent>(HandleAnyChange);
                 EventBus.Instance.Subscribe<SynergyChangedEvent>(HandleAnyChange);
             }
-            Rebuild(activeStars: null);
+            ResetFocus();
         }
 
         private void OnDisable()
@@ -70,112 +72,87 @@ namespace HellpitRampage.UI
                 EventBus.Instance.Unsubscribe<SynergyChangedEvent>(HandleAnyChange);
             }
             ClearStars();
+            ResetFocus();
         }
 
+        /// <summary>
+        /// Committed-state inventory/synergy events. Only meaningful while a tooltip is open
+        /// (so its star's active/idle visual stays current); drag previews own their own
+        /// per-frame refresh and ignore the cache.
+        /// </summary>
         private void HandleAnyChange<T>(T _) where T : IGameEvent
         {
-            // While ANY drag is active, the per-frame Update path owns the star state;
-            // ignore committed-state events so we don't fight with the preview pass.
             if (DragHandler.Active != null || ShopSlotDragHandler.Active != null) return;
-            Rebuild(activeStars: null);
+            var tooltip = DetailTooltipController.Current;
+            if (tooltip != null && IsStarred(tooltip.ShownItem))
+            {
+                RenderFocus(tooltip, tooltip.ShownItem, activeStars: null);
+            }
+            else
+            {
+                ClearFocus();
+            }
         }
 
         private void Update()
         {
-            // Grid drag (existing owned item being moved).
+            // 1. Grid drag of an owned starred item.
             var gridDrag = DragHandler.Active;
-            if (gridDrag != null && gridDrag.CurrentItem != null)
+            if (gridDrag != null && IsStarred(gridDrag.CurrentItem))
             {
-                bool changed = (object)gridDrag != _trackedDrag
+                bool changed = (object)gridDrag != _focusSource
                     || gridDrag.CurrentSnappedOrigin != _lastPreviewOrigin
                     || gridDrag.CurrentRotation != _lastPreviewRotation;
                 if (changed)
                 {
-                    _trackedDrag = gridDrag;
                     _lastPreviewOrigin = gridDrag.CurrentSnappedOrigin;
                     _lastPreviewRotation = gridDrag.CurrentRotation;
-                    RebuildWithDragPreview(gridDrag.CurrentItem, gridDrag.CurrentSnappedOrigin, gridDrag.CurrentRotation);
+                    RenderGridDragPreview(gridDrag);
                 }
                 return;
             }
 
-            // Shop drag (unbought offer being dragged from a shop slot).
+            // 2. Shop drag of an unbought starred offer.
             var shopDrag = ShopSlotDragHandler.Active;
-            if (shopDrag != null && shopDrag.CurrentItemData != null)
+            if (shopDrag != null && IsStarred(shopDrag.CurrentItemData))
             {
-                bool changed = (object)shopDrag != _trackedDrag
+                bool changed = (object)shopDrag != _focusSource
                     || shopDrag.CurrentSnappedOrigin != _lastPreviewOrigin
                     || shopDrag.CurrentRotation != _lastPreviewRotation;
                 if (changed)
                 {
-                    _trackedDrag = shopDrag;
                     _lastPreviewOrigin = shopDrag.CurrentSnappedOrigin;
                     _lastPreviewRotation = shopDrag.CurrentRotation;
-                    RebuildWithShopDragPreview(shopDrag.CurrentItemData, shopDrag.CurrentSnappedOrigin, shopDrag.CurrentRotation);
+                    RenderShopDragPreview(shopDrag);
                 }
                 return;
             }
 
-            if (_trackedDrag != null)
+            // 3. Detail tooltip showing a starred item.
+            var tooltip = DetailTooltipController.Current;
+            if (tooltip != null && IsStarred(tooltip.ShownItem))
             {
-                _trackedDrag = null;
-                // Drag ended — revert to committed state. The ItemPlacedEvent (if a purchase
-                // committed) or ItemMovedEvent (if a grid move committed) will also fire Rebuild,
-                // but doing it here too keeps rendering correct on cancelled drags.
-                Rebuild(activeStars: null);
-            }
-        }
-
-        /// <summary>
-        /// Renders stars from committed grid state. <paramref name="activeStars"/> may be supplied
-        /// by the preview path so we don't repeat resolver work; null falls back to the
-        /// SynergyService cache.
-        /// </summary>
-        private void Rebuild(HashSet<(int starredID, Vector2Int cell, EdgeDirection dir)> activeStars)
-        {
-            ClearStars();
-            if (InventoryService.Instance == null || _gridParent == null) return;
-            var grid = InventoryService.Instance.Grid;
-
-            foreach (var item in grid.Items)
-            {
-                if (item?.Data?.StarredEdges == null) continue;
-                if (item.Data.StarredEdges.Count == 0) continue;
-
-                foreach (var star in item.EffectiveStarredEdges())
+                if ((object)tooltip != _focusSource || tooltip.ShownItem != _focusItem)
                 {
-                    Vector2Int absStarCell = item.Origin + star.Cell;
-                    Vector2Int targetCell = absStarCell + DirectionOffset(star.Direction);
-
-                    if (!grid.IsCellInBounds(targetCell)) continue;
-                    if (item.OccupiesCell(targetCell)) continue;
-
-                    bool active = activeStars != null
-                        ? activeStars.Contains((item.InstanceID, star.Cell, star.Direction))
-                        : (SynergyService.Instance != null &&
-                           SynergyService.Instance.IsStarActive(item.InstanceID, star.Cell, star.Direction));
-
-                    SpawnStar(active, targetCell);
+                    RenderFocus(tooltip, tooltip.ShownItem, activeStars: null);
                 }
+                return;
             }
+
+            // 4. Nothing focused → hide.
+            if (_focusSource != null) ClearFocus();
         }
 
-        /// <summary>
-        /// Temporarily relocates the dragged item to its current snapped origin/rotation, asks the
-        /// resolver to recompute active stars against that hypothetical placement, then restores
-        /// the item's state. Pure read-only over the grid — no events fire from <see cref="SynergyResolver.Resolve"/>.
-        /// </summary>
-        private void RebuildWithDragPreview(ItemInstance dragItem, Vector2Int previewOrigin, Rotation previewRotation)
-        {
-            if (InventoryService.Instance == null) { ClearStars(); return; }
-            var grid = InventoryService.Instance.Grid;
+        // ---------- Render paths ----------
 
-            // Skip preview when the item isn't in the grid (e.g., during a one-frame inconsistency
-            // after Sell-modal removal) — fall back to committed state. Reuses the WS-012 helper
-            // so we don't pay an extra LINQ allocation just to check containment.
+        private void RenderGridDragPreview(DragHandler drag)
+        {
+            if (InventoryService.Instance == null) { ClearFocus(); return; }
+            var grid = InventoryService.Instance.Grid;
+            var dragItem = drag.CurrentItem;
             if (!InventoryService.Instance.ContainsItem(dragItem))
             {
-                Rebuild(activeStars: null);
+                ClearFocus();
                 return;
             }
 
@@ -183,10 +160,10 @@ namespace HellpitRampage.UI
             Rotation savedRotation = dragItem.Rotation;
             try
             {
-                dragItem.Origin = previewOrigin;
-                dragItem.Rotation = previewRotation;
+                dragItem.Origin = drag.CurrentSnappedOrigin;
+                dragItem.Rotation = drag.CurrentRotation;
                 var preview = SynergyResolver.Resolve(grid);
-                Rebuild(preview.ActiveStars);
+                RenderFocus(drag, dragItem, preview.ActiveStars);
             }
             finally
             {
@@ -197,27 +174,27 @@ namespace HellpitRampage.UI
 
         /// <summary>
         /// Shop drags don't yet have an <see cref="ItemInstance"/> — only a <see cref="ItemData"/>
-        /// offer. To make the resolver see the unbought item at the preview cell, we synthesize a
-        /// transient ItemInstance, slot it into <see cref="InventoryGrid"/> via the preview-only
-        /// helpers, resolve, then remove. Sentinel ID = int.MinValue avoids collision with the
-        /// grid's running <c>_nextInstanceID</c> (which only grows positive from 1).
+        /// offer. We synthesize a transient ItemInstance, slot it via the preview-only helpers,
+        /// resolve, then remove. The synthetic uses <see cref="int.MinValue"/> as a sentinel ID so
+        /// it can't collide with the grid's running positive <c>_nextInstanceID</c>.
         /// </summary>
-        private void RebuildWithShopDragPreview(ItemData offerData, Vector2Int previewOrigin, Rotation previewRotation)
+        private void RenderShopDragPreview(ShopSlotDragHandler shopDrag)
         {
-            if (InventoryService.Instance == null) { ClearStars(); return; }
+            if (InventoryService.Instance == null) { ClearFocus(); return; }
             var grid = InventoryService.Instance.Grid;
-            if (offerData == null || offerData.Shape == null) { ClearStars(); return; }
+            var offerData = shopDrag.CurrentItemData;
+            if (offerData == null || offerData.Shape == null) { ClearFocus(); return; }
 
-            // Reuse the synthetic instance across frames so we don't allocate per cursor move.
             if (_shopPreviewItem == null)
             {
-                _shopPreviewItem = new ItemInstance(int.MinValue, offerData, previewOrigin, hostBag: null, previewRotation);
+                _shopPreviewItem = new ItemInstance(int.MinValue, offerData,
+                    shopDrag.CurrentSnappedOrigin, hostBag: null, shopDrag.CurrentRotation);
             }
             else
             {
                 _shopPreviewItem.Data = offerData;
-                _shopPreviewItem.Origin = previewOrigin;
-                _shopPreviewItem.Rotation = previewRotation;
+                _shopPreviewItem.Origin = shopDrag.CurrentSnappedOrigin;
+                _shopPreviewItem.Rotation = shopDrag.CurrentRotation;
                 _shopPreviewItem.HostBag = null;
             }
 
@@ -225,13 +202,70 @@ namespace HellpitRampage.UI
             try
             {
                 var preview = SynergyResolver.Resolve(grid);
-                Rebuild(preview.ActiveStars);
+                RenderFocus(shopDrag, _shopPreviewItem, preview.ActiveStars);
             }
             finally
             {
                 grid.RemoveItemDirect(_shopPreviewItem);
             }
         }
+
+        /// <summary>
+        /// Renders stars for a single focused item. <paramref name="activeStars"/> from a
+        /// preview-mode resolve is consulted first; null falls through to the committed-state
+        /// <see cref="SynergyService"/> cache.
+        /// </summary>
+        private void RenderFocus(object source, ItemInstance focusItem,
+            HashSet<(int starredID, Vector2Int cell, EdgeDirection dir)> activeStars)
+        {
+            ClearStars();
+            _focusSource = source;
+            _focusItem = focusItem;
+            if (focusItem == null || _gridParent == null) return;
+            if (focusItem.Data?.StarredEdges == null) return;
+            if (focusItem.Data.StarredEdges.Count == 0) return;
+
+            var grid = InventoryService.Instance != null ? InventoryService.Instance.Grid : null;
+            if (grid == null) return;
+
+            foreach (var star in focusItem.EffectiveStarredEdges())
+            {
+                Vector2Int absStarCell = focusItem.Origin + star.Cell;
+                Vector2Int targetCell = absStarCell + DirectionOffset(star.Direction);
+
+                if (!grid.IsCellInBounds(targetCell)) continue;
+                if (focusItem.OccupiesCell(targetCell)) continue;
+
+                bool active = activeStars != null
+                    ? activeStars.Contains((focusItem.InstanceID, star.Cell, star.Direction))
+                    : (SynergyService.Instance != null &&
+                       SynergyService.Instance.IsStarActive(focusItem.InstanceID, star.Cell, star.Direction));
+
+                SpawnStar(active, targetCell);
+            }
+        }
+
+        // ---------- Focus bookkeeping ----------
+
+        private void ResetFocus()
+        {
+            _focusSource = null;
+            _focusItem = null;
+        }
+
+        private void ClearFocus()
+        {
+            ClearStars();
+            ResetFocus();
+        }
+
+        private static bool IsStarred(ItemInstance item) =>
+            item?.Data?.StarredEdges != null && item.Data.StarredEdges.Count > 0;
+
+        private static bool IsStarred(ItemData data) =>
+            data?.StarredEdges != null && data.StarredEdges.Count > 0;
+
+        // ---------- Helpers ----------
 
         private void ClearStars()
         {
@@ -253,7 +287,6 @@ namespace HellpitRampage.UI
             rt.anchorMin = rt.anchorMax = new Vector2(0, 0);
             rt.pivot = new Vector2(0.5f, 0.5f);
             rt.sizeDelta = new Vector2(STAR_SIZE_PX, STAR_SIZE_PX);
-            // Center of the target cell in grid-local pixels.
             float cx = (targetCell.x + 0.5f) * CELL_SIZE_PX;
             float cy = (targetCell.y + 0.5f) * CELL_SIZE_PX;
             rt.anchoredPosition = new Vector2(cx, cy);
