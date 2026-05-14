@@ -15,7 +15,8 @@ MonoBehaviour:
   ItemName: Hollow Crown
   Description: A crown for a king who never sat the throne.
   Icon: {fileID: 0}
-  Shape: {fileID: 11400000, guid: 1b2c3d4e5f60718293040506070809b0, type: 2}
+  PlaceholderColor: {r: 0.72, g: 0.55, b: 0.20, a: 1}
+  Shape: {fileID: 11400000, guid: 1b2c3d4e5f60718293040506070809b6, type: 2}
   Tags:
   - 1
   StarredEdges: []

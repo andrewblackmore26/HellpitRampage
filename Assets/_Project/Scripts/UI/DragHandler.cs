@@ -85,16 +85,44 @@ namespace HellpitRampage.UI
         {
             if (!_dragging) return;
 
-            if (Kind == DraggableKind.Item && Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame)
-            {
-                _currentRotation = ShapeMath.Next(_currentRotation);
-                UpdateValidationOverlay();
-            }
+            // WS-012.1: R-key OR right-mouse-click rotates the dragged item 90° CW.
+            // Bags have no rotation field on the data model, so both triggers are gated
+            // to Item drags only (consistent with WS-009's R-key behavior).
+            bool rotateRequested =
+                (Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame) ||
+                (Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame);
+            if (rotateRequested && Kind == DraggableKind.Item) Rotate();
 
             if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
             {
                 CancelDrag();
             }
+        }
+
+        private void Rotate()
+        {
+            _currentRotation = ShapeMath.Next(_currentRotation);
+            RebuildDraggedVisualForRotation();
+            UpdateValidationOverlay();
+        }
+
+        // WS-012.2: the dragged item is rendered as per-cell Image children of a bbox-sized root.
+        // When _currentRotation changes mid-drag, the children need to re-arrange and the root
+        // needs to resize to the new bounding box; otherwise the ghost shows the original shape.
+        private void RebuildDraggedVisualForRotation()
+        {
+            if (Kind != DraggableKind.Item) return;
+            if (Item == null || Item.Data == null || Item.Data.Shape == null) return;
+            if (View == null || _rt == null) return;
+
+            var rotated = ShapeMath.Rotate(Item.Data.Shape.Cells, _currentRotation);
+            if (rotated.Count == 0) return;
+
+            int maxX = 0, maxY = 0;
+            foreach (var c in rotated) { if (c.x > maxX) maxX = c.x; if (c.y > maxY) maxY = c.y; }
+            _rt.sizeDelta = new Vector2((maxX + 1) * CELL_SIZE_PX, (maxY + 1) * CELL_SIZE_PX);
+
+            View.BuildItemCellChildren(_rt, rotated, Item.Data);
         }
 
         public void OnEndDrag(PointerEventData eventData)
@@ -154,6 +182,10 @@ namespace HellpitRampage.UI
         {
             if (_rt != null) _rt.anchoredPosition = _originalAnchoredPos;
             _currentRotation = _originalRotation;
+            // WS-012.2: if the player rotated during drag and we're now snapping back, the per-cell
+            // children are still in the rotated layout. Rebuild them at the original rotation so
+            // the visible shape matches the unchanged data model.
+            RebuildDraggedVisualForRotation();
         }
 
         private bool TryCommitDrop()

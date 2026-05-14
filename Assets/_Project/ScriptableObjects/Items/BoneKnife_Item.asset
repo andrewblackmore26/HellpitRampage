@@ -15,7 +15,8 @@ MonoBehaviour:
   ItemName: Bone Knife
   Description: A weathered bone shard, sharpened to a point. Whispers softly when thrown.
   Icon: {fileID: 0}
-  Shape: {fileID: 11400000, guid: 1b2c3d4e5f60718293040506070809b0, type: 2}
+  PlaceholderColor: {r: 0.92, g: 0.88, b: 0.78, a: 1}
+  Shape: {fileID: 11400000, guid: 1b2c3d4e5f60718293040506070809b4, type: 2}
   Tags:
   - 1
   StarredEdges: []

@@ -1530,3 +1530,218 @@ Spec: `WS-012_Locking_Selling_via_Modal.md` (provided inline 2026-05-15).
 11. [ ] **Verify & commit**
     - Commit 1 (pre-fix), Commit 2 (main spec).
     - Push to `main` (only after explicit user OK per workflow safety).
+
+## Review (WS-012)
+
+**What landed (2 commits on `main`):**
+
+1. `4cd77f6` — `[WS-012 pre-fix] Gold auto-vacuum at round end`
+   - `GoldFieldSweeper` scene-scoped MonoBehaviour subscribes to `RoundEndedEvent` and force-collects every active `GoldPickup` via the existing `_isDespawned`-guarded path.
+   - `GoldPickup.ForceCollect()` public entry; reuses the pool-release path.
+   - Wires a single root GameObject `GoldFieldSweeper` in `Game.unity` (RootOrder 17).
+2. `a93b035` — `[WS-012] Item & bag locking + item selling via sell modal`
+   - Data: `ItemInstance.IsLocked` + `BagInstance.IsLocked` (default false).
+   - Events: 6 new (`ItemLockChangedEvent`, `BagLockChangedEvent`, `ItemDragBeganEvent`, `ItemDragEndedEvent`, `BagDragBeganEvent`, `BagDragEndedEvent`).
+   - `InventoryService`: `ToggleItemLock`, `ToggleBagLock`, `ContainsItem`.
+   - `DragHandler`: publishes drag-began/ended (including Escape-cancel), `_dropCommitted` flag for `WasCancelled`, defensive `ContainsItem` check in `OnEndDrag` so sold-mid-drag items don't NRE.
+   - `LockToggleHandler`: right-click toggles lock; skips mid-drag clicks.
+   - `SellModal`: dark panel covering ShopSlotsArea region, "Drag here to sell for Xg" / "LOCKED — cannot sell"; `IDropHandler.OnDrop` removes item + adds `ceil(EffectivePrice/2)` gold; refuses locked drops.
+   - `InventoryGridView`: `_lockIconSprite` SerializeField, `AttachLockIcon` helper at top-left (anchor (0,1), pivot (0,1), pos (4,-4), 16×16), `RenderItem`/`RenderBag` attach `LockToggleHandler` and the icon when locked, subscribes to Lock*ChangedEvent for refresh.
+   - Scene wiring (Game.unity): SellModal under ShopOverlayPanel at fileIDs 4100–4123, `_lockIconSprite` wired to `lock_icon.png` (fileID 21300000), ShopOverlayPanel's m_Children adds the SellModal RectTransform.
+   - Sprite: `Sprites/UI/lock_icon.png` 16×16 placeholder (System.Drawing-generated padlock silhouette) + matching `.meta` (pixelsToUnit 56, alphaIsTransparency).
+   - Tests: `SellMathTests.cs` (3) + `ItemLockTests.cs` (5) = +8 → expected total **91**.
+
+**Verification status (cannot run in agent environment):**
+- Compile: not run — agent has no Unity build pipeline. All new code uses existing APIs the way prior WS-XXX code does. Stylistic consistency reviewed; namespaces, field naming, file headers match project conventions.
+- Tests: not run — designer needs to open Unity to execute Test Runner. Test count target = 91.
+- Playtest §4.9 / §5.3: all 17 manual scenarios listed in the spec are NOT yet exercised. Designer must Boot → Play and walk through.
+
+**Lessons captured:**
+- L-012 (`tasks/lessons.md`) — IDropHandler.OnDrop fires before OnEndDrag; destructive drops need ContainsItem defense.
+- L-013 (`tasks/lessons.md`) — Single-sprite PNG references in scene YAML need `fileID: 21300000`; meta GUID alone targets the Texture2D root and silently nulls.
+
+**Not pushed.** Per workflow safety guidance, push to `origin/main` is a shared-state action that waits for explicit designer confirmation. Commits are local-only until then.
+
+**Deferred to designer:**
+- Open Unity 6000.4.6f1 → Test Runner → run EditMode. Expect 91 passing, 0 failing.
+- Boot → Play → 3-round playtest covering all 17 §5.3 scenarios.
+- If everything passes, run `git push origin main` to publish both commits.
+
+**Open considerations for follow-up:**
+- The placeholder `lock_icon.png` is a System.Drawing-generated padlock; replace with a designer-authored sprite in polish phase.
+- `SellModal` lives under `ShopOverlayPanel`, so its `OnEnable` only subscribes during shop phase — fine because item selling is only meaningful then. If the design ever allows mid-combat selling, hoist the modal to a higher-level always-active root.
+- TMP migration for the modal label deferred (uses legacy `UI.Text` to avoid first-open TMP Essentials prompt, consistent with WS-001 baseline).
+
+
+---
+
+# Active task: WS-012.1 — Tooltip & Input UX Refinement
+
+Spec: `WS-012_1_Tooltip_Input_UX_Refinement.md` (provided inline 2026-05-15, supersedes WS-012's `LockToggleHandler` right-click-to-lock with click-tooltip-with-action-icons).
+
+## Approach decisions
+- **UI build**: code-built in controllers (DetailTooltipController & RecipesComingSoonModal build their own child hierarchies in Awake). Only the controller root GOs need to land in Game.unity. Rationale: spec is permissive ("place the GameObject in the main canvas"), code-built keeps scene YAML minimal and dodges hand-authored fileID risk (L-003/L-013). Pattern already used by `InventoryGridView.AttachLockIcon`.
+- **Sprites**: reuse existing `lock_icon.png` for both locked (white tint) and unlocked (gray tint) states; book button uses Unity built-in UISprite (fileID 10907) with a gold tint. Spec §2 OUT-of-scope notes call sprite art a polish item and explicitly allow placeholders.
+
+## Plan
+
+### Phase 1 — C# implementation (compile-safe order)
+- [ ] DELETE `Assets/_Project/Scripts/UI/LockToggleHandler.cs` + `.meta`
+- [ ] NEW `Assets/_Project/Scripts/UI/GridClickTooltipHandler.cs` — IPointerClickHandler, left-click + !eventData.dragging → `DetailTooltipController.Current.ShowForItem/Bag`
+- [ ] NEW `Assets/_Project/Scripts/UI/TooltipBackdropClickHandler.cs` — IPointerClickHandler, calls `DetailTooltipController.Hide`
+- [ ] NEW `Assets/_Project/Scripts/UI/RecipesComingSoonModal.cs` — Auto-builds panel + label + OK button + click-outside backdrop. `Show()`/`Close()` public API.
+- [ ] NEW `Assets/_Project/Scripts/UI/DetailTooltipController.cs` — Static `Current`. Auto-builds backdrop + panel + icon + name + type + description + stats + effects + action row + book/lock buttons in Awake (idempotent per L-007). Subscribes to ItemDragBeganEvent, BagDragBeganEvent, ItemLockChangedEvent, BagLockChangedEvent. `Update` polls Escape. `ShowForItem`/`ShowForBag` populate via `TooltipContent.FromItemInstance/FromBag` and position near cursor (clamped to canvas via spec §3 gotcha #12). Lock button click swaps sprite tint + calls `InventoryService.ToggleItemLock/Bag`. Book click calls `RecipesComingSoonModal.Show()`.
+- [ ] MODIFY `Assets/_Project/Scripts/UI/DragHandler.cs` — Extract `Rotate()` helper from inline R-key code; add right-click trigger calling same helper. Preserve `Kind == Item` gating (bag data has no rotation field; right-click on bag drag is no-op same as R-key).
+- [ ] MODIFY `Assets/_Project/Scripts/UI/InventoryGridView.cs` — Replace `AddComponent<LockToggleHandler>` with `AddComponent<GridClickTooltipHandler>` in `RenderItem` AND `RenderBag`. **REMOVE the `AddComponent<TooltipTarget>` lines on grid items/bags** (spec §1 #2: hover on grid items does NOTHING). Keep `TooltipTarget` on shop slots only.
+
+### Phase 2 — Scene wiring (Game.unity)
+- [ ] Resize hover tooltip Panel 3611 sizeDelta 280×180 → 480×280
+- [ ] Bump TitleLabel 3623 fontSize 20 → 24
+- [ ] Bump RarityLabel 3643 fontSize 14 → 16
+- [ ] Bump StatsLabel 3653 fontSize 14 → 18
+- [ ] Bump DescriptionLabel 3663 fontSize 13 → 18
+- [ ] Bump SynergiesLabel 3673 fontSize 12 → 18
+- [ ] Add DetailTooltipController GameObject under Canvas (fileID 901). New GO has RectTransform anchored stretch + the controller MonoBehaviour. SerializeField references: `_lockedSprite` and `_unlockedSprite` both → `lock_icon.png` (fileID 21300000, guid e2f30415263748596a7b8c9d0e1f2a99) per L-013.
+- [ ] Add Canvas child to its m_Children list
+
+### Phase 3 — Tests
+- [ ] NEW `Assets/_Project/Tests/EditMode/RotationTests.cs` — verify `ShapeMath.Next` cycles 0→1→2→3→0 (the underlying rotate logic both R-key and right-click now share).
+- [ ] NEW `Assets/_Project/Tests/EditMode/CanvasClampTests.cs` — verify a panel positioned near canvas edges clamps to bounds (math-only, no Unity scene round-trip).
+- [ ] Existing `ItemLockTests.cs` already covers `ToggleItemLock` / `ToggleBagLock` semantics — no duplication needed.
+- [ ] Existing `TooltipContentTests.cs` already covers `TooltipContent.FromItem` — no new TooltipFormatter (we reuse the existing helper, per spec §4.3 note).
+- Target test count: 83 + 2 = **85** new total.
+
+### Phase 4 — Documentation
+- [ ] Add review section to `tasks/todo.md` with: what changed, what's deferred, lessons captured
+- [ ] If any new L-NNN lesson surfaces during implementation, append to `tasks/lessons.md`
+
+## Out of scope (per spec §2)
+Codex/recipe content (book is placeholder), animations, sounds, mobile long-press, right-click context menu on stationary items, multi-select, drag-from-tooltip, bag-contents preview, detail tooltip on shop items, TMP migration, ground items.
+
+
+## Review (WS-012.1)
+
+### What changed
+
+**Deleted (1 file + 1 meta):**
+- `Assets/_Project/Scripts/UI/LockToggleHandler.cs` — right-click-to-lock is removed entirely. Lock toggling now lives on the detail tooltip's action button.
+
+**New scripts (4 files + 4 metas):**
+- `Assets/_Project/Scripts/UI/GridClickTooltipHandler.cs` — left-click (non-drag) on a grid item/bag → opens detail tooltip. Replaces `LockToggleHandler` in `InventoryGridView.AddComponent` calls.
+- `Assets/_Project/Scripts/UI/TooltipBackdropClickHandler.cs` — click-outside-panel dismisses tooltip.
+- `Assets/_Project/Scripts/UI/RecipesComingSoonModal.cs` — placeholder modal launched by the tooltip's book button. Code-builds its own backdrop + panel + label + OK button + click-outside backdrop. To be replaced by a real codex view in WS-014.
+- `Assets/_Project/Scripts/UI/DetailTooltipController.cs` — scene-scoped manager. Code-builds backdrop + panel + icon + name + type + description + stats + conditional-effects text + book/lock action buttons. Static `Current`. `ShowForItem`/`ShowForBag`/`Hide` API. Subscribes to `ItemDragBeganEvent`, `BagDragBeganEvent`, `ItemLockChangedEvent`, `BagLockChangedEvent`. Polls Escape in Update. Lock button toggles via `InventoryService.ToggleItemLock/Bag` + sprite-tint swap (red = locked, gray = unlocked). Book button launches the modal. Position math (`ClampPanelCenter`) is a public static for unit testing.
+
+**Modified scripts (2 files):**
+- `DragHandler.cs` — right-mouse-button polled in `Update` alongside the existing R-key trigger; both call a new `Rotate()` helper. Item-only gating preserved (bag rotation isn't in the data model).
+- `InventoryGridView.cs` — `RenderItem`/`RenderBag` now `AddComponent<GridClickTooltipHandler>` instead of `LockToggleHandler` + `TooltipTarget`. Hover on grid items/bags now does nothing (spec §1 #2).
+
+**Scene wiring (`Game.unity`):**
+- Hover tooltip Panel `m_SizeDelta` 280×180 → 480×280.
+- Font sizes: TitleLabel 20→24, RarityLabel 14→16, StatsLabel 14→18, DescriptionLabel 13→18, SynergiesLabel 12→18.
+- Added new `DetailTooltipController` GameObject (fileIDs 4500–4502) under Canvas (m_Children appended). `_lockedSprite`/`_unlockedSprite` both wired to `lock_icon.png` (fileID 21300000, guid `e2f30415263748596a7b8c9d0e1f2a99` per L-013). Tints differentiate visual state.
+
+**Tests (2 new files + 2 metas):**
+- `RotationTests.cs` — 5 tests pinning `ShapeMath.Next` cycle (both R-key and right-click route through this).
+- `CanvasClampTests.cs` — 6 tests on `DetailTooltipController.ClampPanelCenter` covering all 4 edges + a corner case.
+- Expected total: 83 + 11 = **94 passing** (designer must verify in Test Runner).
+
+### Approach decisions, captured
+
+- **Code-built UI in controllers** (vs. authoring all child YAML in scene): chosen for minimal scene-YAML risk and per-L-014 only-build-in-Awake discipline. Net scene impact = 3 lines (one new GameObject anchor + one m_Children entry).
+- **Sprite reuse**: locked/unlocked both = `lock_icon.png` with tint variation; book button uses no sprite + gold tint. Spec §2 explicitly allows placeholder art; new PNG authoring is polish phase.
+- **Item-only rotation gating** preserved: spec §4.6 dropped the `Kind == Item` gate in its example pseudocode, but the data model has no bag rotation field and `MoveBagAndItems` doesn't accept a rotation. Bag drags ignore both R-key and right-click — same as pre-existing R-key behavior.
+- **Hot-reload safety (L-014)**: `EnsureBuilt` runs in Awake only, NOT OnEnable. OnEnable just refreshes `Current` and resubscribes events. After hot-reload during Play, tooltip is broken until Play restart — same documented stance as L-007 for cross-dependent singletons.
+
+### Verification status (cannot run in agent environment)
+
+- **Compile**: not run — agent has no Unity build pipeline. Static analysis: all new types resolve; all referenced APIs (`EventBus.Subscribe<T>`, `InventoryService.ToggleItemLock/Bag`, `TooltipContent.FromItemInstance`, `Keyboard.current.escapeKey`, `Mouse.current.rightButton`) match existing usage. No remaining references to deleted `LockToggleHandler`.
+- **Tests**: not run — designer needs to open Unity → Test Runner → EditMode. Target = 94 passing.
+- **Playtest** (spec §4.10): not exercised. Designer must Boot → Play and verify all 20 manual scenarios — especially:
+  - Click on grid item → tooltip opens near cursor with icon/name/type/desc/stats/effects + 2 action icons.
+  - Hover on grid item/bag → nothing happens.
+  - Hover on shop slot → enlarged readable tooltip (no action icons).
+  - Click backdrop / press Escape / drag-begin → tooltip auto-dismisses.
+  - Lock button toggles state, in-grid 16×16 overlay updates via existing event flow.
+  - Book button → "Recipes coming soon" modal; OK or click-outside dismisses; tooltip stays open.
+  - R-key OR right-click during drag rotates item ghost 90° CW.
+  - Right-click on a stationary item → nothing happens.
+
+### Lessons captured
+
+- **L-014** (`tasks/lessons.md`) — Code-built UI: build in Awake only, not OnEnable. Domain-reload skips Awake but resets `_built` to false; OnEnable-driven rebuild duplicates children. The L-007 pattern fits `GetComponent` (idempotent query) but breaks `new GameObject` (creating side effect).
+- MEMORY entry: `code-built-ui-awake-only` linked from `MEMORY.md`.
+
+### Not pushed
+
+Per project workflow safety: agents do not push to `origin/main` without explicit designer confirmation. Local commit pending; push after designer playtest passes.
+
+### Open considerations for follow-up
+
+- The detail tooltip's layout is pixel-positioned in code (`BuildPanelContent` hardcodes anchor positions). A LayoutGroup would be more responsive but adds runtime ordering complexity. Polish phase.
+- `RecipesComingSoonModal` is owned (parented) by `DetailTooltipController`, not a sibling. Spec §4.9 suggested sibling-of-canvas placement; child-of-controller is simpler and z-orders correctly. Either is valid.
+- Book button currently has no sprite (just a gold-tinted rectangle). A small open-book PNG would help discoverability. Polish phase.
+- Lock icon overlay on the item itself (16×16 from WS-012) is intentionally a different sprite-size scope than the tooltip's 40×40 lock button. We reuse the same lock_icon.png for both via tint; once real art lands, may want a separate larger asset.
+
+---
+
+# WS-012.2 — Multi-Cell Item Shapes + Placeholder Colors (review)
+
+Spec: inline (provided 2026-05-15). Plan: `C:\Users\admin\.claude\plans\kind-skipping-lampson.md`.
+
+### Scope shipped
+
+- `ItemData.PlaceholderColor` field added (default medium-grey opaque). Per-item tint until real sprite art lands.
+- `InventoryGridView.RenderItem` refactored from one bbox-sized Image to root + per-cell Image children. Cell children carry `PlaceholderColor`; root is transparent + raycast-targeted. Non-rectangular shapes no longer tint their bounding-box empty cells.
+- New public `InventoryGridView.BuildItemCellChildren(Transform, IReadOnlyList<Vector2Int>, ItemData)` so `DragHandler` can rebuild visuals on rotation without round-tripping through `RefreshAll()`.
+- `DragHandler.Rotate()` now rebuilds the per-cell visual + resizes root bbox. `ReturnToOriginal()` also rebuilds (so a cancelled rotation snaps back visually). `_originalRotation` is preserved across drag cycle.
+- 4 new `ItemShape` SOs authored: `BoneKnife_1x2H` (cells `(0,0),(1,0)`), `Sword_1x3H` (cells `(0,0),(1,0),(2,0)`), `HollowCrown_2x2` (full 2×2), `Bell_2x1` (cells `(0,0),(1,0)`).
+- All 10 existing `ItemData` assets gained `PlaceholderColor` lines. BoneKnife/TarnishedBell/HollowCrown/MysticSword reshaped per spec. MysticSword stars repositioned from `(0,0)L + (0,0)R` to `(0,0)L + (2,0)R` so both stars activate adjacents instead of one pointing into the sword's own (1,0) cell.
+- Tests: 3 ShapeMath (1×3 rotation, 2×2 invariance, L-shape four-rotation distinctness), 3 InventoryGrid (1×3 placement, 1×3 partial-outside-bag, 1×3 rotated to vertical), 2 PlaceholderColor (default value + distinct-instance non-aliasing). **+8 tests** → target ~110 total.
+
+### Out of scope (per user direction during planning)
+
+- **Tooltip preview rendering**: user clarified "shape preview" = the multi-cell grid render itself, not a mini image inside any tooltip popup. No changes to `DetailTooltipController.cs`, `Tooltip.cs`, or `TooltipContent.cs`.
+- **Tooltip consolidation** (one unified UI replacing the WS-012.1 hover/click split): deferred to its own follow-up workstream.
+
+### Decisions worth recording
+
+- **Star repositioning on Mystic Sword (1×1 → 1×3)**: applied the natural design intent of "stars at both blade ends" by moving `(0,0) Direction Right` to `(2,0) Direction Right`. The original `(0,0) Right` would have pointed into the sword's own `(1,0)` cell and `SynergyResolver.OccupiesCell()` would silently skip it.
+- **Bag rendering**: left unchanged. WardenPouch (3×3 full rectangle) reads identically as one Image or per-cell children, and bag data is out-of-scope per spec §2.
+- **Lock icon positioning**: unchanged. Still parented to root at top-left `(4, -4)` from bbox top-left. Since the root remains bbox-sized, the icon auto-tracks the new shapes.
+- **Star overlay (`StarIndicatorOverlay`)**: unchanged. It renders stars at absolute grid positions via `EffectiveStarredEdges()` — agnostic to per-cell vs single-Image rendering.
+
+### Verification owed (designer)
+
+- Boot → Play → playtest 3 rounds. Zero errors + zero warnings expected.
+- Test Runner: ~110 tests passing, 0 failing.
+- Visual: BoneKnife reads as 1×2 bone-white, Hollow Crown as 2×2 dark gold, TarnishedBell as 2×1 brass-tarnish, all other items as 1×1 with their distinct color. Mystic Sword appears in shop as 1×3 steel-blue.
+- Drag a multi-cell item, hit R or right-click → cells reshape. Hit Esc → snap back to original shape.
+- Place Mystic Sword (1×3) + adjacent Sharpening items on both ends → both stars activate, damage rises +6.
+
+### Lessons captured (added to MEMORY.md)
+
+- `feedback_single_tooltip_ui.md` — user wants ONE tooltip UI; consolidation queued as follow-up. Avoid proposing parallel tooltip systems.
+- `feedback_shape_is_grid_footprint.md` — "shape preview" = the multi-cell grid render itself; don't add separate mini-shape images.
+
+### Files
+
+**Modified:**
+- `Assets/_Project/Scripts/Inventory/ItemData.cs`
+- `Assets/_Project/Scripts/UI/InventoryGridView.cs` (per-cell render + `BuildItemCellChildren`; removed unused `_itemTintColor`)
+- `Assets/_Project/Scripts/UI/DragHandler.cs` (`Rotate` + `ReturnToOriginal` rebuild visual)
+- `Assets/_Project/ScriptableObjects/Items/*_Item.asset` × 10 (PlaceholderColor + reshape refs for 4 items)
+- `Assets/_Project/Tests/EditMode/ShapeMathTests.cs` (+3 tests)
+- `Assets/_Project/Tests/EditMode/InventoryGridTests.cs` (+3 tests)
+
+**Created:**
+- `Assets/_Project/ScriptableObjects/Items/BoneKnife_1x2H_ItemShape.asset` + `.meta`
+- `Assets/_Project/ScriptableObjects/Items/Sword_1x3H_ItemShape.asset` + `.meta`
+- `Assets/_Project/ScriptableObjects/Items/HollowCrown_2x2_ItemShape.asset` + `.meta`
+- `Assets/_Project/ScriptableObjects/Items/Bell_2x1_ItemShape.asset` + `.meta`
+- `Assets/_Project/Tests/EditMode/PlaceholderColorTests.cs` + `.meta`
+
+### Not pushed
+
+Local commit on `main`. Push after designer playtest passes.
+

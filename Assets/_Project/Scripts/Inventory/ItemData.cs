@@ -19,6 +19,9 @@ namespace HellpitRampage.Inventory
         [Tooltip("Icon shown in inventory grid and shop.")]
         public Sprite Icon;
 
+        [Tooltip("WS-012.2: per-cell tint while real sprite art is pending. Multiplies with Icon if set; renders alone otherwise.")]
+        public Color PlaceholderColor = new Color(0.5f, 0.5f, 0.5f, 1f);
+
         [Tooltip("The cell footprint of this item. Most starter items are 1x1.")]
         public ItemShape Shape;
 

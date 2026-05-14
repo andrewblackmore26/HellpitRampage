@@ -15,6 +15,7 @@ MonoBehaviour:
   ItemName: Veil Thread
   Description: Thread spun from a story no one remembers.
   Icon: {fileID: 0}
+  PlaceholderColor: {r: 0.40, g: 0.55, b: 0.70, a: 1}
   Shape: {fileID: 11400000, guid: 1b2c3d4e5f60718293040506070809b0, type: 2}
   Tags:
   - 1

@@ -824,6 +824,75 @@ constants. Don't conflate them.
 
 ---
 
+## L-014 — Code-build complex UI in `Awake` only; `OnEnable` rebuild duplicates children
+
+**Surfaced during:** WS-012.1 design review (preempted — caught before commit).
+
+**The mistake (averted):** the first draft of `DetailTooltipController` called `EnsureBuilt()` from
+BOTH `Awake` and `OnEnable`, mirroring the L-007 hot-reload-safety pattern. That pattern is right
+for *cached component references* (`_rb = GetComponent<Rigidbody2D>()`) which are idempotent —
+calling `GetComponent` twice returns the same instance. It is **wrong** for *Instantiate-driven
+child UI construction*: `new GameObject(...)` and `transform.SetParent` happily create a second
+copy each time they're called. After a domain reload, the surviving GameObject still has the
+prior session's backdrop/panel/modal as children, `_built` is reset to false, and `EnsureBuilt`
+runs again → two backdrops, two panels, two modals stacked on top of each other. Visual chaos +
+duplicate event subscriptions.
+
+**Why L-007 doesn't fit:** L-007's `EnsureInitialized` calls `if (_field == null)` guards. A
+`GetComponent` call doesn't create — it queries. Building a UI tree, by contrast, is a *creation*
+side effect. The "is it already built?" check would have to walk the children list and reattach
+references to existing UI elements by name (fragile, complex, easy to break).
+
+**The fix:** build UI in `Awake` only. In `OnEnable`, restrict yourself to idempotent operations
+(reassign the static `Current`, re-subscribe events). Accept that after a hot-reload during Play,
+the controller is broken until Play is restarted — same as L-007's documented stance for
+singletons with cross-dependencies.
+
+```csharp
+private void Awake()
+{
+    Current = this;
+    EnsureBuilt();       // builds backdrop + panel + modal children — runs ONCE per scene load
+    HidePanel();
+}
+
+private void OnEnable()
+{
+    // L-014: domain reload skips Awake, so child refs are null and _built is false. We do NOT
+    // call EnsureBuilt here — re-running it would duplicate children. The documented project
+    // stance for hot-reload-during-Play is "restart Play".
+    Current = this;
+    SubscribeEvents();   // idempotent: handler list re-built fresh on subscribe
+}
+```
+
+**When this applies:**
+
+- Any MonoBehaviour that constructs its own child GameObjects (`new GameObject(...)`,
+  `Instantiate`) in an init helper.
+- Especially common for code-built tooltip/modal/HUD controllers, dynamic dialogue trees,
+  procedural-UI authoring.
+- DOES NOT apply to controllers whose UI is fully authored in the scene/prefab — their
+  SerializeFields persist across hot-reload because Unity re-deserializes them.
+
+**Resist:** "make EnsureBuilt smart enough to detect existing children and rewire." The rewire
+path needs to find every Text/Image/Button by name, handle the case where a child is missing,
+and survive future hierarchy changes. The maintenance cost dwarfs the benefit, and the failure
+mode (silently wrong references) is worse than the alternative (obvious "Play is broken,
+restart it" feedback).
+
+**Resist:** "DestroyImmediate all children first, then rebuild." `DestroyImmediate` from `OnEnable`
+during a domain reload can race against Unity's own GO reconstruction; even when it doesn't, you
+get a one-frame flash where children disappear. Don't.
+
+**Resist:** "make `_built` a `[SerializeField]` so it persists across reload." Serialized booleans
+DO survive hot-reload, but the child *references* (`_backdropGO`, `_panelGO`, etc.) are
+non-serialized — they'd still be null even with `_built = true`. You'd skip the rebuild and then
+NRE on the first `_panelGO.SetActive(true)`. Either serialize ALL the refs (which means
+hand-wiring in the Inspector, defeating the whole "code-built" approach) or leave it as-is.
+
+---
+
 ## Meta — when capturing a new lesson
 
 1. Number it (`L-NNN`) so future references stay stable.

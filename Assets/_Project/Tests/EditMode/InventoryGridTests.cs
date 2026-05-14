@@ -38,6 +38,7 @@ namespace HellpitRampage.Tests
             (0, 1), (1, 1), (2, 1),
             (0, 2), (1, 2), (2, 2));
         private static ItemShape Shape1x2Horizontal() => MakeShape((0, 0), (1, 0));
+        private static ItemShape Shape1x3Horizontal() => MakeShape((0, 0), (1, 0), (2, 0));
 
         // ---------------- 1. PlaceBag in empty grid ----------------
 
@@ -262,6 +263,50 @@ namespace HellpitRampage.Tests
             CollectionAssert.Contains(neighbors, n1);
             CollectionAssert.Contains(neighbors, n2);
             CollectionAssert.Contains(neighbors, n3);
+        }
+
+        // ---------------- WS-012.2: 1x3 horizontal placement ----------------
+
+        [Test]
+        public void PlaceItem_1x3Horizontal_FitsInsideLargeBag()
+        {
+            var grid = new InventoryGrid();
+            grid.PlaceBag(MakeBag("Host", Shape3x3()), new Vector2Int(0, 0)); // (0..2, 0..2)
+
+            var sword = grid.PlaceItem(MakeItem("Sword", Shape1x3Horizontal()), new Vector2Int(0, 1));
+
+            Assert.IsNotNull(sword, "1x3 horizontal should fit on row 1 of a 3x3 bag.");
+            Assert.AreEqual(3, sword.EffectiveCells().Count);
+        }
+
+        [Test]
+        public void PlaceItem_1x3Horizontal_PartiallyOutsideBag_Fails()
+        {
+            var grid = new InventoryGrid();
+            grid.PlaceBag(MakeBag("Host", Shape3x3()), new Vector2Int(0, 0)); // (0..2, 0..2)
+
+            // Origin (1,1) → cells (1,1), (2,1), (3,1). (3,1) is outside the 3x3 bag.
+            var sword = grid.PlaceItem(MakeItem("Sword", Shape1x3Horizontal()), new Vector2Int(1, 1));
+
+            Assert.IsNull(sword, "1x3 placement must fail when any cell would land outside the bag.");
+            Assert.AreEqual(0, grid.Items.Count);
+        }
+
+        [Test]
+        public void PlaceItem_1x3Horizontal_Rotated90_BecomesVerticalAndFits()
+        {
+            var grid = new InventoryGrid();
+            grid.PlaceBag(MakeBag("Host", Shape3x3()), new Vector2Int(0, 0)); // (0..2, 0..2)
+
+            // 1x3 rotated 90° CW → 3x1 vertical. Placed at origin (1,0) → cells (1,0),(1,1),(1,2).
+            var sword = grid.PlaceItem(MakeItem("Sword", Shape1x3Horizontal()), new Vector2Int(1, 0), Rotation.Deg90);
+
+            Assert.IsNotNull(sword, "Rotated 1x3 (now 3x1 vertical) should fit in column 1 of a 3x3 bag.");
+            var cells = sword.EffectiveCells();
+            Assert.AreEqual(3, cells.Count);
+            // Verify it's now vertical (all x equal).
+            int firstX = cells[0].x;
+            foreach (var c in cells) Assert.AreEqual(firstX, c.x, "After Deg90, rotated 1x3 cells should share an x-coordinate.");
         }
 
         // ---------------- 15. Clear resets all state ----------------
