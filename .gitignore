@@ -13,6 +13,10 @@
 /[Bb]uilds/
 /[Ll]ogs/
 /[Uu]ser[Ss]ettings/
+
+# Unity editor crash-recovery folder (auto-saved scene snapshots, not real project content).
+/Assets/_Recovery/
+/Assets/_Recovery.meta
 *.log
 
 # By default unity supports Blender asset imports, *.blend1 blender files do not need to be commited to version control.

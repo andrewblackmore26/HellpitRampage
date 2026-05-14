@@ -1,0 +1,30 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 01a2b3c4d5e6f70819203142536475a8, type: 3}
+  m_Name: VeilThread_Item
+  m_EditorClassIdentifier:
+  ItemName: Veil Thread
+  Description: Thread spun from a story no one remembers.
+  Icon: {fileID: 0}
+  Shape: {fileID: 11400000, guid: 1b2c3d4e5f60718293040506070809b0, type: 2}
+  Tags:
+  - 1
+  StarredEdges: []
+  ConditionalEffects: []
+  Rarity: 1
+  BasePrice: 0
+  ProjectilePrefab: {fileID: 5300000000000000001, guid: 06a2b3c4d5e6f70819203142536475ad, type: 3}
+  Cooldown: 0.3
+  Range: 9
+  ProjectileSpeed: 14
+  ProjectileLifetime: 3
+  Damage: 1

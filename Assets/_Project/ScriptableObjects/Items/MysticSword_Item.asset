@@ -1,0 +1,54 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 01a2b3c4d5e6f70819203142536475a8, type: 3}
+  m_Name: MysticSword_Item
+  m_EditorClassIdentifier:
+  ItemName: Mystic Sword
+  Description: A blade that drinks the whetstones beside it. Pulses faster with tempo nearby.
+  Icon: {fileID: 0}
+  Shape: {fileID: 11400000, guid: 1b2c3d4e5f60718293040506070809b0, type: 2}
+  Tags:
+  - 1
+  StarredEdges:
+  - Cell: {x: 0, y: 0}
+    Direction: 2
+  - Cell: {x: 0, y: 0}
+    Direction: 3
+  ConditionalEffects:
+  - ActivatorTag: 3
+    Target: 0
+    EffectType: 0
+    ModifierKind: 0
+    Magnitude: 3
+    TriggerCount: 5
+    BehaviorAction: 0
+    BehaviorMagnitude: 0
+    DisplayName: Sharpening Hunger
+    Description: 'Gain +3 damage per Sharpening adjacent to my stars'
+  - ActivatorTag: 4
+    Target: 0
+    EffectType: 1
+    ModifierKind: 0
+    Magnitude: 0
+    TriggerCount: 5
+    BehaviorAction: 0
+    BehaviorMagnitude: 0
+    DisplayName: Surge
+    Description: 'Every 5th attack fires an extra projectile when Tempo adjacent'
+  Rarity: 2
+  BasePrice: 0
+  ProjectilePrefab: {fileID: 5300000000000000001, guid: 06a2b3c4d5e6f70819203142536475ad, type: 3}
+  Cooldown: 1
+  Range: 8
+  ProjectileSpeed: 10
+  ProjectileLifetime: 3
+  Damage: 1
