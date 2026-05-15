@@ -27,6 +27,7 @@ namespace HellpitRampage.Combat
         public float CurrentHP => _currentHP;
         public float MaxHP => _maxHP;
         public bool IsDead => _isDead;
+        public bool IsPlayer => _owner == Owner.Player;
 
         private void OnEnable()
         {
@@ -44,6 +45,18 @@ namespace HellpitRampage.Combat
             _maxHP = Mathf.Max(1f, maxHP);
             _currentHP = _maxHP;
             _isDead = false;
+            OnHealthChanged?.Invoke(_currentHP, _maxHP);
+        }
+
+        /// <summary>
+        /// WS-013: restores HP state from a save without firing the death check. Used by
+        /// RunRestoreController on resume; treats max=current=values verbatim.
+        /// </summary>
+        public void RestoreFromSave(float current, float max)
+        {
+            _maxHP = Mathf.Max(1f, max);
+            _currentHP = Mathf.Clamp(current, 0f, _maxHP);
+            _isDead = _currentHP <= 0f;
             OnHealthChanged?.Invoke(_currentHP, _maxHP);
         }
 

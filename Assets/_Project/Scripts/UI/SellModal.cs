@@ -1,8 +1,8 @@
 using HellpitRampage.Core;
 using HellpitRampage.Inventory;
+using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
-using UnityEngine.UI;
 
 namespace HellpitRampage.UI
 {
@@ -16,7 +16,7 @@ namespace HellpitRampage.UI
     public class SellModal : MonoBehaviour, IDropHandler
     {
         [SerializeField] private GameObject _panel;
-        [SerializeField] private Text _label;
+        [SerializeField] private TextMeshProUGUI _label;
         [SerializeField] private Color _normalTextColor = Color.white;
         [SerializeField] private Color _lockedTextColor = new Color(0.9f, 0.3f, 0.3f, 1f);
 

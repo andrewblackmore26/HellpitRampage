@@ -932,6 +932,545 @@ grep -r "class LockToggleHandler" Assets/_Project/Scripts/ # → 0 results
 
 ---
 
+## L-016 — Volume sliders that "work" without an AudioMixer are silently no-ops
+
+**Surfaced during:** WS-012.X audit (post WS-012.6 ship). The `SettingsManager` code path
+was complete — sliders persisted to `settings.json`, `ApplyVolume` called
+`_mainMixer.SetFloat("Volume_Master", db)`, settings round-tripped on relaunch — but
+no audio in the game responded. The audit found three independent gaps:
+
+1. No `MainMixer.mixer` asset existed anywhere in `Assets/`.
+2. `SettingsManager._mainMixer` SerializeField was `{fileID: 0}` (null) in `Boot.unity`.
+3. No `AudioSource` in the project routed its `Output` to a mixer group.
+
+**The mistake:** assuming the audio chain works end-to-end because the C# is correct.
+`ApplyVolume` early-returns silently when `_mainMixer == null`. `SetFloat` on an
+unexposed parameter name returns false but doesn't throw. AudioSources with
+`Output = None` bypass the mixer entirely regardless of the mixer state. Every
+failure mode is silent.
+
+**The fix:** three coordinated requirements, none of which can be skipped:
+
+1. **Asset must exist:** create `Assets/_Project/Audio/MainMixer.mixer` via
+   `Assets → Create → Audio Mixer` (NOT by hand-editing YAML; the mixer's GUIDs for
+   groups, snapshots, and exposed params interlock and are not safely authorable in
+   a text editor).
+2. **Parameters must be exposed with exact names:** `Volume_Master`, `Volume_Music`,
+   `Volume_SFX`, `Volume_Voice`. Case-sensitive, no spaces. Right-click each group's
+   Volume slider in the Audio Mixer window → "Expose 'Volume (of <Group>)' to script"
+   → rename in the Exposed Parameters dropdown.
+3. **Every AudioSource must route to a mixer group:** `Output` field → pick a group
+   from `MainMixer` (Music / SFX / Voice). `Output = None` bypasses the mixer
+   regardless of slider position; the slider will appear to do nothing on that source.
+
+**When this applies:**
+- Any task that adds a new `AudioSource` component, anywhere.
+- Any verification step that claims "audio works" — check at least one AudioSource is
+  routed and verify slider movement at runtime, don't trust the code path alone.
+
+**Pattern to verify:**
+
+```yaml
+# In Boot.unity SettingsManager block — _mainMixer must reference the .mixer asset:
+_mainMixer: {fileID: <mixer fileID>, guid: <mixer guid>, type: 2}
+
+# On every AudioSource component — m_OutputAudioMixerGroup must reference a group:
+m_OutputAudioMixerGroup: {fileID: <group fileID>, guid: <mixer guid>, type: 2}
+```
+
+If either is `{fileID: 0}`, the slider is a placebo for that source.
+
+**Resist:** "the settings round-trip test passes, so audio works." The
+`SettingsSaveRoundTripTests` only verify the persistence path. They don't touch the
+mixer or any AudioSource. A green test suite tells you nothing about whether sound
+actually changes volume in the game.
+
+---
+
+## L-017 — Multi-cell drag ghost: rebuild children on drag start AND on rotation
+
+**Surfaced during:** WS-012.X audit, tracking down the "items render as 1×1"
+complaint. WS-012.2 implemented multi-cell rendering correctly for placed grid items
+(`InventoryGridView.RenderItem` + `BuildItemCellChildren`) and for grid-internal
+drags (`DragHandler.RebuildDraggedVisualForRotation`). But `ShopSlotDragHandler`
+instantiated a single-cell `_ghostPrefab` Image at `OnBeginDrag` and never rebuilt
+it — so dragging a 2×2 Hollow Crown or 1×2 Bone Knife from a shop slot showed a
+fixed 1×1 yellow tile at the cursor, identical to dragging a 1×1 Whetstone. The
+grid highlight underneath painted the correct multi-cell footprint, but players
+fixate on the cursor.
+
+**The mistake:** treating the cursor ghost as a "drag handle" (single visual cue
+that the cursor is holding something) rather than a preview of the item's actual
+on-grid appearance. When new drag sources enter the codebase (shop, future ground
+re-drag, future inventory containers), the temptation is to copy whichever ghost
+prefab the project already has — but the existing single-cell prefab predates
+WS-012.2's multi-cell support.
+
+**The fix:** any drag source that picks up an item from outside the grid must call
+`InventoryGridView.BuildItemCellChildren(ghostRT, rotatedCells, itemData)` at:
+1. **OnBeginDrag** — replaces the prefab's single-cell appearance with the real
+   shape from frame 0.
+2. **OnRotate** (R-key or right-click) — rebuilds children for the new rotation,
+   matching the grid drag path's `RebuildDraggedVisualForRotation`.
+
+Additionally, suppress the prefab's root `Image.color` to alpha 0 so the original
+single-cell tint doesn't show through under the rebuilt children (which only cover
+populated cells, not the full bbox for L-shapes).
+
+**When this applies:**
+- Any new component that drags items from a source other than the inventory grid.
+- Future containers (shop, ground re-drag, crafting bench, vendor).
+- NOT bags — bags drag as a unit at the grid level, not as a multi-cell ghost.
+
+**Pattern to copy:**
+
+```csharp
+// In OnBeginDrag, after the ghost is instantiated:
+RebuildGhostVisual();
+
+// In Rotate:
+private void Rotate()
+{
+    _currentRotation = ShapeMath.Next(_currentRotation);
+    RebuildGhostVisual();
+    UpdateValidationOverlay();
+}
+
+private void RebuildGhostVisual()
+{
+    if (_draggedOffer is not ItemData itemData) return;
+    if (itemData.Shape == null) return;
+    if (_gridView == null || _ghostRT == null) return;
+
+    var rotated = ShapeMath.Rotate(itemData.Shape.Cells, _currentRotation);
+    if (rotated.Count == 0) return;
+
+    int maxX = 0, maxY = 0;
+    foreach (var c in rotated) { if (c.x > maxX) maxX = c.x; if (c.y > maxY) maxY = c.y; }
+    _ghostRT.sizeDelta = new Vector2((maxX + 1) * CELL_SIZE_PX, (maxY + 1) * CELL_SIZE_PX);
+
+    var rootImg = _ghostInstance != null ? _ghostInstance.GetComponent<Image>() : null;
+    if (rootImg != null) rootImg.color = new Color(0f, 0f, 0f, 0f);
+
+    _gridView.BuildItemCellChildren(_ghostRT, rotated, itemData);
+}
+```
+
+**Resist:** "extract a DragGhostBuilder helper class so all drag sources share the
+code." `InventoryGridView.BuildItemCellChildren` IS the shared primitive — both
+grid drag and shop drag call it directly. A wrapper class around a 5-line method
+adds a layer without removing duplication. Refactor only if a third drag source
+appears and the bbox+sizeDelta math becomes painful to repeat.
+
+**Resist:** "the ghost prefab is centered (pivot 0.5, 0.5) so a multi-cell layout
+will look offset." The `BuildItemCellChildren` helper uses child pivot (0,0) and
+positions children at `(off.x*56, off.y*56)` from the parent's bottom-left, so the
+full bbox is centered on the cursor naturally. No pivot surgery needed.
+
+---
+
+## L-019 — Stacked code-built text fields need VerticalLayoutGroup + ContentSizeFitter, not hardcoded sizeDelta + Overflow
+
+**Surfaced during:** post-WS-013 playtest (designer feedback — *"The tooltip text is
+overlapping each other"*).
+
+**The mistake:** `TooltipController.BuildPanelContent` built a vertically stacked
+column of five TMP text fields by parenting each one directly to the panel with
+**hardcoded `anchoredPosition.y` + `sizeDelta.y`**, plus `text.overflowMode =
+TextOverflowModes.Overflow`. Two failure modes compound:
+
+1. Adjacent rects fight for the same screen space. Stats was top-anchored at
+   `y=-244` with `sizeDelta.y=90` → bottom edge at `-334`. Effects was bottom-anchored
+   at `y=60` with `sizeDelta.y=88` → top edge at `-212` from panel top (360 − 60 − 88).
+   The two rects literally **overlapped by 56 px in layout space**, before any text
+   was even populated. As soon as both fields had content, the renderer drew them on
+   top of each other.
+2. `TextOverflowModes.Overflow` means whenever any field's content exceeds its
+   hardcoded height, the surplus **renders past the rect** onto whatever sits below.
+   Bone Knife's 3-line description (slot height 50 px) bled into the Stats slot;
+   Mystic Sword's 4-line stats (slot height 90 px) bled into Effects.
+
+The bug was invisible during initial authoring — short placeholder content fit the
+fixed heights — and only manifested once real items shipped with multi-line
+descriptions and conditional-effect lists.
+
+**The fix:** wrap the five text fields in a `Content` RectTransform that stretches
+between the icon (top) and the ActionRow (bottom) of the panel. Give the container
+a `VerticalLayoutGroup`. Give each text field a `ContentSizeFitter`
+(`verticalFit = PreferredSize`, `horizontalFit = Unconstrained`). Switch the TMP
+overflow mode from `Overflow` to `Truncate` as a defensive safety net. Empty content
+collapses to height 0 naturally — the layout group respects that — so the visual
+contract is "five rows stacked, each as tall as it needs to be, never overlapping."
+
+The minimal Y math (top inset 120 px below panel top to clear the icon, bottom inset
+64 px above panel bottom to clear the 56 px ActionRow + 8 px buffer) replaces the
+five magic Y constants. Each text's font size, style, alignment, and color is still
+configured per call site; only the geometry is now layout-driven.
+
+**When this applies:**
+
+- Any code-built UI that stacks multiple text fields, images, or icon-rows in a
+  panel. If you're typing two `anchoredPosition.y = X` lines in a row, you're
+  probably about to ship this bug.
+- Anywhere `TextOverflowModes.Overflow` is used. Default to `Truncate` (or
+  `Ellipsis`); reserve `Overflow` only for transient overlays where bleed is
+  visually fine (drop indicators, ghost previews).
+- DOES NOT apply to absolute-positioned UI like floating icons, drag ghosts,
+  badge overlays, or modal action rows — those don't stack with siblings.
+
+**Pattern to copy** when authoring a code-built stack-of-text panel:
+
+```csharp
+// Container that stretches inside the panel, leaving room for icon at top + action row at bottom.
+var contentGO = new GameObject("Content", typeof(RectTransform));
+contentGO.transform.SetParent(panel, false);
+var contentRT = (RectTransform)contentGO.transform;
+contentRT.anchorMin = new Vector2(0f, 0f);
+contentRT.anchorMax = new Vector2(1f, 1f);
+contentRT.pivot = new Vector2(0.5f, 1f);
+contentRT.offsetMin = new Vector2(0f, BOTTOM_RESERVED_PX);   // ActionRow + buffer
+contentRT.offsetMax = new Vector2(0f, -TOP_RESERVED_PX);     // Icon height + padding (negative)
+
+var vlg = contentGO.AddComponent<VerticalLayoutGroup>();
+vlg.padding = new RectOffset(16, 16, 4, 4);
+vlg.spacing = 6f;
+vlg.childAlignment = TextAnchor.UpperCenter;
+vlg.childControlWidth = true;
+vlg.childControlHeight = true;
+vlg.childForceExpandWidth = true;
+vlg.childForceExpandHeight = false;
+
+// Each row is a TMP + ContentSizeFitter; height tracks the rendered preferred height
+// of the wrapped content. Empty text → height 0 → row collapses, no whitespace gap.
+var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer),
+                        typeof(TextMeshProUGUI), typeof(ContentSizeFitter));
+go.transform.SetParent(contentRT, false);
+
+var text = go.GetComponent<TextMeshProUGUI>();
+text.textWrappingMode = TextWrappingModes.Normal;
+text.overflowMode = TextOverflowModes.Truncate;  // defensive — VLG normally handles fit
+
+var fitter = go.GetComponent<ContentSizeFitter>();
+fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+fitter.verticalFit   = ContentSizeFitter.FitMode.PreferredSize;
+```
+
+**Resist:** "just bump `sizeDelta.y` from 50 to 80 — that fixes Bone Knife." It does
+fix Bone Knife and breaks the next item that exceeds 80 px. The bug is the
+fixed-height architecture, not the magic number you picked. Patch the architecture
+once; never tune magic heights again.
+
+**Resist:** "ContentSizeFitter is overkill for static content." It isn't static —
+descriptions and conditional-effect lists vary by item. Even if today's content
+happens to fit, tomorrow's content (new items, localization to a longer language,
+font swap) will overflow the moment someone forgets to revisit the heights.
+
+**Resist:** "switch `TextOverflowModes.Overflow` → `Truncate` and keep the hardcoded
+heights — that's a smaller change." Truncate without ContentSizeFitter means the
+overflow disappears silently. Player sees "DMG: 5\nCooldown: 0.5s\nRa..." with no
+hint that two stat lines are hidden. Worse than the original bug. Truncate is only
+acceptable as a safety net when the layout already gives each row its full needed
+height.
+
+---
+
+## L-018 — Save files reference content by stable string IDs, never by Unity object reference
+
+**Surfaced during:** WS-013 implementation (preempted — caught during planning, not via
+playtest failure).
+
+**The mistake (averted):** the most natural-looking save schema would hold direct
+`ItemData` / `BagData` / `HeroData` references — let Newtonsoft serialize whatever it
+can. That looks compact in code:
+
+```csharp
+[Serializable] public class ItemSaveEntry { public ItemData Item; public Vector2Int Origin; ... }
+```
+
+But Unity ScriptableObject references serialize to JSON as either empty objects (for
+generic Newtonsoft) or InstanceID ints (Unity's JsonUtility) — and InstanceIDs are
+**ephemeral**, regenerated every domain reload. Save → quit → relaunch → InstanceIDs
+have shifted → every save reference resolves to null. Even if the serializer captures
+the GUID (it doesn't, by default), GUIDs change when assets get reimported with
+different settings or moved between projects.
+
+**The fix:** every save schema field that points at a SO holds a plain `string`
+identifier. A `DataRegistry` (Managers-parented singleton initialized at Boot) maps the
+string back to the live asset reference on load. The string identifier lives on the SO
+as a serialized field; the asset stem matches the string by convention (e.g.,
+`BoneKnife_Item.asset` has `_id = "bone_knife"`).
+
+The integer rotation enum value gets the same treatment — store the raw int (0/90/180/270)
+rather than the enum name, so renaming `Rotation.Deg90 → Rotation.Right` later doesn't
+break old saves. Cast at the boundary: `data.Rotation = (int)item.Rotation;` on save,
+`(Rotation)entry.Rotation` on load.
+
+**When this applies:**
+- Any new save schema, any new persistence layer, any new RemoteConfig / Steam Cloud
+  / leaderboard payload.
+- Any time a spec says "save the ItemData" or "save the HeroData" — read it as
+  "save the stable Id and rehydrate via DataRegistry."
+- DOES NOT apply to scene/prefab YAML references — those use Unity's GUID system
+  which is meta-file-scoped and stable for in-project references.
+
+**Pattern to copy:**
+
+```csharp
+// Data SO:
+[SerializeField] private string _id;
+public string Id => _id;
+
+// Schema DTO:
+[Serializable] public class ItemSaveEntry
+{
+    public string ItemId;          // resolved via DataRegistry on load
+    public int OriginX;
+    public int OriginY;
+    public int Rotation;           // raw enum int — survives enum renames
+    public bool IsLocked;
+}
+
+// Capture:
+data.Items.Add(new ItemSaveEntry
+{
+    ItemId = item.Data.Id,
+    OriginX = item.Origin.x,
+    OriginY = item.Origin.y,
+    Rotation = (int)item.Rotation,
+    IsLocked = item.IsLocked,
+});
+
+// Restore:
+var itemData = DataRegistry.Instance.GetItem(entry.ItemId);
+if (itemData == null) continue; // GetItem already logged; degrade gracefully
+inv.PlaceItem(itemData, new Vector2Int(entry.OriginX, entry.OriginY), (Rotation)entry.Rotation);
+```
+
+**Resist:** "Newtonsoft is smart enough to serialize the asset reference, just try it."
+It isn't — it serializes the SO's serializable members (which usually omit Unity object
+identity entirely) and produces an unrestorable payload. Even if you add a
+[JsonConverter] for ScriptableObject, you've coupled persistence to runtime asset
+identity. The string ID layer is the indirection that lets content reshuffle without
+breaking saves.
+
+**Resist:** "we can store the asset GUID instead — those are stable." Asset GUIDs are
+project-scoped and survive renames within the project, but they don't survive
+project-to-project moves, code-generation, or asset re-imports that emit new GUIDs.
+String IDs are content-owned and travel with the data.
+
+**Resist:** "we have one hero, just hardcode `heroId = "default"`." Tempting on day
+one, broken on day two — when the second hero ships, every existing save resolves to
+"default" instead of the player's actual choice. The string ID + DataRegistry layer
+costs ~30 lines to set up and pays for itself the first time multi-hero or multi-pet
+content lands.
+
+---
+
+## L-020 — Guard EVERY scene-startup call site for resume; per-consumer despawn guards can't cover out-of-band re-activation
+
+**Surfaced during:** post-WS-013 playtest (designer feedback — *"resume run starts me off at
+round 1 but the timer goes on for infinity"* and an `InvalidOperationException` double-release
+from the projectile pool).
+
+### Part A — a resume must suppress *all* fresh-run startup, not just the one you remembered
+
+**The mistake:** WS-013 added a `PendingResume` guard so `HeroStartingLoadout.Start()` skips
+seeding the starting bag/item when resuming. But the Game scene has a **second** unconditional
+startup component — `GameSceneBootstrap.Start()` calls `RunManager.StartNewRun()` every time
+the scene loads. WS-013 never touched it. On resume:
+
+1. Frame 0: `GameSceneBootstrap.Start()` → `StartNewRun()` → `CurrentPhase = Combat`, publishes
+   `RoundStartedEvent` → `CombatRoundController` starts the round timer + spawns enemies.
+2. Frame 1: `RunRestoreController` (deferred one frame) → `RestoreFromSave()` → `CurrentPhase = Shop`.
+3. The timer's `Update()` loop runs off its own `_timerRunning` flag, not the phase. When it
+   hits 0 it calls `EndCurrentRound()`, which early-returns because `CurrentPhase != Combat`.
+   The round never ends → timer counts forever. Combat + shop are both "live" at once.
+
+**The fix:** mirror the existing guard in *every* startup path:
+
+```csharp
+// GameSceneBootstrap.Start(), before StartNewRun():
+if (GameManager.Instance != null && GameManager.Instance.PendingResume != null) return;
+```
+
+Ordering is safe because `RunRestoreController` clears `PendingResume` one frame later — every
+`Start()` in frame 0 still sees it set.
+
+**When this applies:**
+- Any feature that "resumes / restores / loads into" a scene instead of starting it fresh.
+  Before shipping, enumerate **every** MonoBehaviour with an `Awake`/`Start` that mutates run
+  state or spawns content, and confirm each one is resume-aware. Grep for the thing that starts
+  the mode (`StartNewRun`, `BeginLevel`, seeding loadouts) — there is usually more than one.
+- The trap is partial coverage: you guard the call site you were thinking about and miss the
+  sibling. The symptom (fresh content layered on restored content) is confusing because the
+  restore *did* run — it just lost a race with an unguarded starter.
+
+### Part B — a per-consumer despawn guard cannot make a pool double-release-safe
+
+**The mistake (latent, pre-existing, amplified by Part A):** `Projectile._isDespawned` (L-005)
+is correct and airtight for the same-physics-step double-trigger it was built for. But it is a
+**per-activation** flag — reset every `OnEnable`. It cannot catch a double-release where the
+instance is re-activated *out of band* between the two releases (scene reload / domain reload:
+pooled instances live under the `DontDestroyOnLoad` PoolManager and survive scene loads, while
+`PoolManager._pools` resets). `PoolManager.Release` called `pool.Release(instance)` blind, so a
+redundant release tripped `ObjectPool`'s `collectionCheck` and threw.
+
+**The fix:** add pool-level idempotency on the `PooledObject` marker — the per-instance source
+of truth for "am I currently in my pool," owned by `PoolManager`, independent of any consumer's
+flag:
+
+```csharp
+// PooledObject.cs
+[HideInInspector] public bool IsPooled;
+
+// PoolManager.Get(): after pool.Get()
+marker.IsPooled = false;        // checked out
+
+// PoolManager.Release(): before pool.Release(instance)
+if (marker.IsPooled)
+{
+    Debug.LogWarning($"PoolManager.Release: '{instance.name}' already in pool; ignoring.");
+    return;
+}
+marker.IsPooled = true;
+pool.Release(instance);
+```
+
+`collectionCheck` stays **ON** — this does not suppress it (L-005's rule). It prevents the
+redundant call from ever *reaching* `pool.Release`, so the guardrail still fires on a genuinely
+new bug. The two guards are complementary: `_isDespawned` enforces the consumer's one-shot
+semantics (one hit per projectile); `IsPooled` enforces pool integrity for *every* pooled type.
+
+**When this applies:**
+- Any object pool whose instances can outlive a scene (pool owner is `DontDestroyOnLoad`).
+- Any pooled type whose self-release guard resets in `OnEnable` — i.e. all of them.
+- DOES NOT replace the consumer's own guard; both are needed for different reasons.
+
+**Resist:** "the consumer already has `_isDespawned`, the pool guard is redundant." It isn't —
+`_isDespawned` resets on `OnEnable`; `IsPooled` does not reset until the next real `Get`. They
+catch different windows.
+
+**Resist:** "just disable `collectionCheck`." L-005 already forbids this. The idempotency flag
+fixes the *caller* (`PoolManager`), which is exactly what L-005 asks for.
+
+**Resist:** "Part A and Part B are unrelated, file them separately." They were one playtest:
+the unguarded `GameSceneBootstrap` (Part A) ran infinite combat under a restored shop, which
+fired projectiles forever and finally surfaced the latent pool defect (Part B). The lesson is
+the pair — *partial* resume-awareness produces chaotic states that expose every other latent
+race in the codebase.
+
+---
+
+## L-021 — A deferred "wire this in the Inspector" step is a bug with a delay timer; prefer code-resolved input
+
+**Surfaced during:** WS-014.A audit. The user reported *"the pause menu doesn't exist."* The
+audit traced it to one line: `PauseMenuController._inputActions: {fileID: 0}` in `Game.unity`.
+WS-012.7 had **deliberately deferred** wiring that `InputActionAsset` SerializeField to a
+"3-second manual drag-drop in the Unity Inspector" — the audit even logged it as a Blocking
+item "queued for trivial Unity Editor wiring." It was never done. The pause menu — Resume,
+Settings, Quit-to-Menu, the entire Escape/Start path — was dead code for an entire spec cycle,
+and the next spec (WS-014.B) was about to be built on top of it.
+
+**The mistake:** treating "assign this reference in the Inspector" as a free, riskless step
+that can be split off from the code change and handed to a human. It is not free. A deferred
+manual step has no compiler check, no test, no green/red — it is invisible until someone
+plays the exact path it gates. The implementation summary said "pause menu landed"; the code
+*was* complete; only the un-greppable, un-testable scene assignment was missing. Every audit
+since has had to re-discover the same `{fileID: 0}`.
+
+**The fix — two parts:**
+
+1. **Prefer code-resolved input over a scene SerializeField for critical-path wiring.** This
+   project already has a code-defined input wrapper, `PlayerInputActions`
+   (`InputActionAsset.FromJson`, `Assets/_Project/Scripts/Core/PlayerInputActions.cs`).
+   `PlayerController` news it up directly and never touches a scene reference. Any new
+   consumer of an input action should do the same — there is then nothing to wire, nothing
+   to forget, and it works on the next Play.
+
+2. **If a manual Editor step genuinely cannot be avoided** (e.g. an `AudioMixer` asset, which
+   per L-016 must not be hand-authored), it is NOT done until it has been *verified done* —
+   re-grep the scene/asset for `{fileID: 0}` on the field. "I noted it for the user" is not
+   completion. An audit checkbox that can only ever be ❓ is a checkbox that will fail.
+
+**Pattern to copy** (resolve an action without a SerializeField):
+
+```csharp
+private PlayerInputActions _input;
+private InputAction _myAction;
+
+private void EnsureAction()      // call from BOTH Awake and OnEnable (L-007)
+{
+    if (_myAction != null) return;
+    if (_input == null) _input = new PlayerInputActions();
+    _myAction = _input.Player.Pause;   // or .Movement, etc.
+}
+
+private void OnDestroy() => _input?.Dispose();   // FromJson asset must be destroyed
+```
+
+**When this applies:**
+- Any MonoBehaviour that needs an `InputAction` — resolve via `new PlayerInputActions()`,
+  do not add an `InputActionAsset` SerializeField.
+- Any spec that ends with a "manual Unity steps" list. Each item on that list is an
+  un-verified claim. Either eliminate it in code, or gate the spec on re-verifying it.
+- Any audit reviewing a prior spec — if a previous audit said "deferred to a trivial manual
+  step," assume it was never done and check.
+
+**Resist:** "it's just a drag-drop, the user will do it." The WS-012.7 audit said exactly
+that, twice, in writing. It was not done. The cost of the deferral was a whole spec cycle of
+a headline feature being silently broken.
+
+**Resist:** "a SerializeField is more flexible — a designer can swap the input asset." No
+designer on this project swaps input assets; there is one, it is code-generated from
+`PlayerInput.inputactions`, and the flexibility was never used. It bought nothing and cost a
+dead pause menu.
+
+---
+
+## L-022 — A migration not run on scenes is a *functional* break, not cosmetic, when the field's TYPE changed
+
+**Surfaced during:** WS-014.A audit, reconciling with `tasks/full_audit_2026-05-16.md`. WS-012.4
+migrated UI text from `UnityEngine.UI.Text` to `TextMeshProUGUI`. The `MigrateTextToTMPro`
+editor tool was run on scripts and prefabs but **never on the scenes**. The earlier
+`ws_012_x_audit.md` saw "19 legacy `Text` components in `Game.unity`" and filed it as a
+*cosmetic* "Arial vs TMP font" issue, deferred. It is not cosmetic: the C# `SerializeField`
+*types* were changed to `TextMeshProUGUI`, so `Game.unity`'s serialized references — still
+pointing at legacy `Text` components — fail Unity's type check on deserialization and become
+`null`. ~17 in-game labels (round timer, gold, shop names/prices, reroll, sell modal, run-end
+header) render **blank**. It is invisible because every consumer null-guards (`if (_label ==
+null) return;`) — no exception, no log, just no text.
+
+**The mistake:** assuming "the components still exist, they'll just look slightly wrong."
+That holds only if the *consuming field's type* is unchanged (then the old component is still
+assignable and you get a font mismatch — genuinely cosmetic). The moment a migration changes
+the field **type**, every scene and prefab that wired the old type is silently severed. A
+component swap and a type change look identical in a `git diff` of the script; their blast
+radius is not.
+
+**The fix:** when a migration changes a `SerializeField`'s declared type, it is not done
+until it has been run on **every** asset that wires that field — scripts, prefabs, AND every
+scene. A per-scene editor tool (`Tools → WS-012.4 → Migrate Text → TMP (Active Scene)`) must
+be run once per scene, with the L-009 close+reopen dance, and the references re-verified
+non-null afterward.
+
+**When this applies:**
+- Any field-type migration: `Text → TextMeshProUGUI`, `Image → RawImage`, swapping a base
+  class for a derived one, replacing a component with a non-assignable cousin.
+- Auditing: never classify "migration tool not run on scenes/prefabs" as cosmetic without
+  first checking whether the *consuming field's type* changed. If it did, the old wiring is
+  `null` and the feature is broken, not ugly.
+
+**How to detect:** grep the scene for the **old** component's script GUID (here
+`5f7201a12d95ffc409449d95f23cf332` = `UnityEngine.UI.Text`). Any hit is a field that a
+retyped `SerializeField` can no longer bind to.
+
+**Resist:** "the prior audit already looked at this and called it cosmetic." The prior audit
+counted the components but did not cross-check the field types. Counting legacy components
+tells you migration is incomplete; only the type check tells you whether incomplete means
+*ugly* or *broken*.
+
+---
+
 ## Meta — when capturing a new lesson
 
 1. Number it (`L-NNN`) so future references stay stable.

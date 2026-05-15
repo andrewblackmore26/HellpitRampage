@@ -172,11 +172,10 @@ namespace HellpitRampage.UI
             handler.View = this;
             handler.enabled = _bagsInteractable;
 
-            // WS-012.1: left-click opens the detail tooltip; hover on grid bags does nothing.
-            // Lock state is now toggled via the detail tooltip's lock button, not right-click.
-            var clickHandler = bagImg.gameObject.AddComponent<GridClickTooltipHandler>();
-            clickHandler.Kind = GridClickTooltipHandler.TargetKind.Bag;
-            clickHandler.Bag = bag;
+            // WS-012.3: unified tooltip. Hover shows preview; left-click pins with lock/book actions.
+            var inspect = bagImg.gameObject.AddComponent<InspectableItem>();
+            inspect.ItemKind = InspectableItem.Kind.OwnedBag;
+            inspect.Bag = bag;
 
             if (bag.IsLocked) AttachLockIcon(bagImg.transform);
 
@@ -231,11 +230,10 @@ namespace HellpitRampage.UI
             handler.View = this;
             handler.enabled = _itemsInteractable;
 
-            // WS-012.1: left-click opens the detail tooltip; hover on grid items does nothing.
-            // Lock state is now toggled via the detail tooltip's lock button, not right-click.
-            var clickHandler = rootImg.gameObject.AddComponent<GridClickTooltipHandler>();
-            clickHandler.Kind = GridClickTooltipHandler.TargetKind.Item;
-            clickHandler.Item = item;
+            // WS-012.3: unified tooltip. Hover shows preview; left-click pins with lock/book actions.
+            var inspect = rootImg.gameObject.AddComponent<InspectableItem>();
+            inspect.ItemKind = InspectableItem.Kind.OwnedItem;
+            inspect.Item = item;
 
             if (item.IsLocked) AttachLockIcon(rootImg.transform);
 

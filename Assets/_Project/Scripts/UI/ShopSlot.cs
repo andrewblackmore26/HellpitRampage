@@ -1,4 +1,5 @@
 using HellpitRampage.Inventory;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -8,8 +9,8 @@ namespace HellpitRampage.UI
     {
         [SerializeField] private Image _background;
         [SerializeField] private Image _itemIcon;
-        [SerializeField] private Text _nameLabel;
-        [SerializeField] private Text _priceLabel;
+        [SerializeField] private TextMeshProUGUI _nameLabel;
+        [SerializeField] private TextMeshProUGUI _priceLabel;
 
         public ScriptableObject CurrentOffer { get; private set; }
         public bool IsSold { get; private set; }

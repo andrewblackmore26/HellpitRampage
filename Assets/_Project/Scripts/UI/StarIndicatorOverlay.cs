@@ -35,7 +35,7 @@ namespace HellpitRampage.UI
         private readonly List<GameObject> _starInstances = new();
 
         // Tracks the last-rendered focus so we don't rebuild every frame when nothing has changed.
-        // `_focusSource` is one of: a DragHandler, a ShopSlotDragHandler, the DetailTooltipController, or null.
+        // `_focusSource` is one of: a DragHandler, a ShopSlotDragHandler, the TooltipController, or null.
         private object _focusSource;
         private ItemInstance _focusItem;
         private Vector2Int _lastPreviewOrigin;
@@ -83,7 +83,7 @@ namespace HellpitRampage.UI
         private void HandleAnyChange<T>(T _) where T : IGameEvent
         {
             if (DragHandler.Active != null || ShopSlotDragHandler.Active != null) return;
-            var tooltip = DetailTooltipController.Current;
+            var tooltip = TooltipController.Current;
             if (tooltip != null && IsStarred(tooltip.ShownItem))
             {
                 RenderFocus(tooltip, tooltip.ShownItem, activeStars: null);
@@ -128,8 +128,8 @@ namespace HellpitRampage.UI
                 return;
             }
 
-            // 3. Detail tooltip showing a starred item.
-            var tooltip = DetailTooltipController.Current;
+            // 3. Tooltip showing a starred item (hover-preview or pinned).
+            var tooltip = TooltipController.Current;
             if (tooltip != null && IsStarred(tooltip.ShownItem))
             {
                 if ((object)tooltip != _focusSource || tooltip.ShownItem != _focusItem)

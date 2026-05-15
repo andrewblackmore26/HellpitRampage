@@ -12,6 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 01a2b3c4d5e6f70819203142536475a8, type: 3}
   m_Name: BottleOfHush_Item
   m_EditorClassIdentifier:
+  _id: bottle_of_hush
   ItemName: Bottle of Hush
   Description: A bottle full of silence. Use carefully.
   Icon: {fileID: 0}

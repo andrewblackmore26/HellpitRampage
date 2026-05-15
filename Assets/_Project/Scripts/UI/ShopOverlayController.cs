@@ -1,4 +1,5 @@
 using HellpitRampage.Core;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -7,7 +8,7 @@ namespace HellpitRampage.UI
     public class ShopOverlayController : MonoBehaviour
     {
         [SerializeField] private GameObject _panel;
-        [SerializeField] private Text _headerLabel;
+        [SerializeField] private TextMeshProUGUI _headerLabel;
         [SerializeField] private Button _startNextRoundButton;
 
         private void OnEnable()

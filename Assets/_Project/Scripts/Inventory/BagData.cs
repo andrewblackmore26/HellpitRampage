@@ -6,6 +6,10 @@ namespace HellpitRampage.Inventory
     public class BagData : ScriptableObject
     {
         [Header("Identity")]
+        [Tooltip("WS-013: stable string identifier used by the save system. Snake_case. Must match the asset stem and be unique across all BagData.")]
+        [SerializeField] private string _id;
+        public string Id => _id;
+
         public string BagName = "Unnamed Bag";
 
         [Tooltip("Sprite drawn under the bag's cells in the inventory grid.")]

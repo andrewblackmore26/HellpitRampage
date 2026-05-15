@@ -1,5 +1,6 @@
 using HellpitRampage.Core;
 using HellpitRampage.Inventory;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using Random = System.Random;
@@ -11,7 +12,7 @@ namespace HellpitRampage.UI
         [SerializeField] private ItemPool _pool;
         [SerializeField] private ShopSlot[] _slots = new ShopSlot[5];
         [SerializeField] private Button _rerollButton;
-        [SerializeField] private Text _rerollLabel;
+        [SerializeField] private TextMeshProUGUI _rerollLabel;
 
         private int _rerollsThisShop;
         private Random _rng;

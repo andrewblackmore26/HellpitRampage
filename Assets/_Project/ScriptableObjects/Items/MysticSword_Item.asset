@@ -12,6 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 01a2b3c4d5e6f70819203142536475a8, type: 3}
   m_Name: MysticSword_Item
   m_EditorClassIdentifier:
+  _id: mystic_sword
   ItemName: Mystic Sword
   Description: A blade that drinks the whetstones beside it. Pulses faster with tempo nearby.
   Icon: {fileID: 0}

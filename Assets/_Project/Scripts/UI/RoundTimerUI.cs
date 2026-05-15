@@ -1,13 +1,13 @@
 using HellpitRampage.Combat;
 using HellpitRampage.Core;
+using TMPro;
 using UnityEngine;
-using UnityEngine.UI;
 
 namespace HellpitRampage.UI
 {
     public class RoundTimerUI : MonoBehaviour
     {
-        [SerializeField] private Text _label;
+        [SerializeField] private TextMeshProUGUI _label;
         [SerializeField] private CombatRoundController _round;
 
         private int _currentRound;

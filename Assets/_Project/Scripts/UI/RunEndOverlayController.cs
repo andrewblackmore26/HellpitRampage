@@ -1,4 +1,5 @@
 using HellpitRampage.Core;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -7,7 +8,7 @@ namespace HellpitRampage.UI
     public class RunEndOverlayController : MonoBehaviour
     {
         [SerializeField] private GameObject _overlayPanel;
-        [SerializeField] private Text _headerLabel;
+        [SerializeField] private TextMeshProUGUI _headerLabel;
         [SerializeField] private Button _returnButton;
 
         private void OnEnable()

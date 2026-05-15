@@ -24,10 +24,7 @@ namespace HellpitRampage.UI
         private GroundItemPhysics _physics;
         private CanvasGroup _canvasGroup;
         private Vector2 _dragOrigin;
-        private Vector2 _lastPointerPos;
-        private float _lastPointerTime;
         private bool _dragging;
-        private bool _committedThisDrag;
 
         public void Initialize(GroundItem groundItem)
         {
@@ -43,13 +40,8 @@ namespace HellpitRampage.UI
             if (_groundItem == null || _rt == null) return;
             if (DragModeService.Current != null && DragModeService.Current.CurrentMode != DragMode.Items) return;
 
-            if (Tooltip.Instance != null) Tooltip.Instance.Hide();
-
             _dragging = true;
-            _committedThisDrag = false;
             _dragOrigin = _rt.anchoredPosition;
-            _lastPointerPos = eventData.position;
-            _lastPointerTime = Time.unscaledTime;
 
             if (_physics != null) _physics.IsHeld = true;
             _canvasGroup.alpha = 0.7f;
@@ -68,9 +60,6 @@ namespace HellpitRampage.UI
             if (parent == null) return;
             RectTransformUtility.ScreenPointToLocalPointInRectangle(parent, eventData.position, null, out Vector2 local);
             _rt.anchoredPosition = local;
-
-            _lastPointerPos = eventData.position;
-            _lastPointerTime = Time.unscaledTime;
         }
 
         public void OnEndDrag(PointerEventData eventData)
@@ -83,10 +72,9 @@ namespace HellpitRampage.UI
             // Defensive: if SellModal.OnDrop already removed this ground item, we have nothing
             // to revert. Detect by checking whether the manager still owns us.
             bool soldOut = _groundItem != null && GroundManager.Current != null
-                           && !GroundManager.Current.Items.Contains(_groundItem);
+                           && !GroundManager.Current.ContainsItem(_groundItem);
             if (soldOut)
             {
-                _committedThisDrag = true;
                 PublishEnded(wasCancelled: false);
                 return;
             }
@@ -98,7 +86,6 @@ namespace HellpitRampage.UI
             {
                 if (TryPlaceInGrid(eventData.position))
                 {
-                    _committedThisDrag = true;
                     if (GroundManager.Current != null) GroundManager.Current.RemoveItem(_groundItem);
                     PublishEnded(wasCancelled: false);
                     return;

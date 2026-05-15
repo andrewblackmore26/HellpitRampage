@@ -9,6 +9,10 @@ namespace HellpitRampage.Inventory
     public class ItemData : ScriptableObject
     {
         [Header("Identity")]
+        [Tooltip("WS-013: stable string identifier used by the save system. Snake_case. Must match the asset stem and be unique across all ItemData.")]
+        [SerializeField] private string _id;
+        public string Id => _id;
+
         [Tooltip("Display name shown in shop, inventory, codex.")]
         public string ItemName = "Unnamed Item";
 

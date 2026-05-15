@@ -12,10 +12,14 @@ namespace HellpitRampage.Core
         [SerializeField] private int _startingGold = 10;
         [SerializeField] private int _roundEndBonusGold = 5;
 
+        // WS-013: hero scaffolding. Single hero today; multi-hero unlocks fill this meaningfully later.
+        [SerializeField] private HeroData _defaultHero;
+
         public int CurrentRound { get; private set; }
         public RunPhase CurrentPhase { get; private set; } = RunPhase.Idle;
         public int TotalRounds => _totalRounds;
         public int CurrentGold { get; private set; }
+        public HeroData CurrentHero { get; private set; }
 
         private void Awake()
         {
@@ -51,6 +55,7 @@ namespace HellpitRampage.Core
         {
             CurrentRound = 1;
             CurrentPhase = RunPhase.Combat;
+            CurrentHero = _defaultHero;
 
             int oldGold = CurrentGold;
             CurrentGold = _startingGold;
@@ -62,6 +67,23 @@ namespace HellpitRampage.Core
                 EventBus.Instance.Publish(new RunStartedEvent());
                 EventBus.Instance.Publish(new RoundStartedEvent { RoundNumber = CurrentRound });
             }
+        }
+
+        /// <summary>
+        /// WS-013: restores run state from a save without re-firing RunStarted / RoundStarted.
+        /// Phase is set to Shop because saves only happen at shop-phase entry, so the player
+        /// always resumes there. Publishes GoldChangedEvent so UI repaints.
+        /// </summary>
+        public void RestoreFromSave(int round, int gold, HeroData hero)
+        {
+            CurrentRound = Mathf.Clamp(round, 1, _totalRounds);
+            CurrentPhase = RunPhase.Shop;
+            CurrentHero = hero != null ? hero : _defaultHero;
+
+            int oldGold = CurrentGold;
+            CurrentGold = Mathf.Max(0, gold);
+            if (EventBus.Instance != null)
+                EventBus.Instance.Publish(new GoldChangedEvent { OldAmount = oldGold, NewAmount = CurrentGold });
         }
 
         public void EndCurrentRound()

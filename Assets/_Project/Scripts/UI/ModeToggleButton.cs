@@ -1,4 +1,5 @@
 using HellpitRampage.Core;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -12,7 +13,7 @@ namespace HellpitRampage.UI
     public class ModeToggleButton : MonoBehaviour
     {
         [SerializeField] private Button _button;
-        [SerializeField] private Text _label;
+        [SerializeField] private TextMeshProUGUI _label;
 
         private void Awake()
         {

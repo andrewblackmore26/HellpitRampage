@@ -70,10 +70,10 @@ namespace HellpitRampage.UI
             }
         }
 
-        // WS-012.5: when DetailTooltipController's lock action toggles the ItemInstance,
-        // refresh our visual overlay. Grid items get refreshed by InventoryGridView's
-        // RefreshAll on the same event; ground items live in our managed list so we
-        // touch only the affected visual.
+        // WS-012.3: when the unified tooltip's lock action toggles the ItemInstance, refresh
+        // our visual overlay. Grid items get refreshed by InventoryGridView's RefreshAll on
+        // the same event; ground items live in our managed list so we touch only the affected
+        // visual.
         private void HandleItemLockChanged(ItemLockChangedEvent e)
         {
             if (e.Item == null) return;
@@ -163,13 +163,13 @@ namespace HellpitRampage.UI
             var dh = go.GetComponent<GroundDragHandler>();
             if (dh != null) dh.Initialize(groundItem);
 
-            // Click → detail tooltip (left-click opens popup with lock action). Same component
-            // grid items use after WS-012.1 — keeps the click semantics uniform across grid + ground.
-            var click = go.GetComponent<GridClickTooltipHandler>();
-            if (click != null)
+            // WS-012.3: unified tooltip. Hover shows preview; left-click pins with lock/book.
+            // Same component grid items use — keeps semantics uniform across grid + ground.
+            var inspect = go.GetComponent<InspectableItem>();
+            if (inspect != null)
             {
-                click.Kind = GridClickTooltipHandler.TargetKind.Item;
-                click.Item = groundItem.Instance;
+                inspect.ItemKind = InspectableItem.Kind.OwnedItem;
+                inspect.Item = groundItem.Instance;
             }
 
             // Lock icon overlay if the item spawns locked (e.g., locked item spilled from a sold bag).
@@ -203,6 +203,16 @@ namespace HellpitRampage.UI
             foreach (var gi in _items)
                 if (gi.Instance == instance) return gi;
             return null;
+        }
+
+        // WS-012.5: parity with InventoryService.ContainsItem. Used by GroundDragHandler's
+        // "did the sell modal remove me mid-drag" defensive check (L-012 trap).
+        public bool ContainsItem(GroundItem gi)
+        {
+            if (gi == null) return false;
+            foreach (var existing in _items)
+                if (existing == gi) return true;
+            return false;
         }
 
         // WS-012.5: add/remove the 16x16 lock icon overlay on a ground item visual so it

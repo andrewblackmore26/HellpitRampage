@@ -1,3 +1,4 @@
+using HellpitRampage.Core;
 using UnityEngine;
 
 namespace HellpitRampage.Inventory
@@ -16,6 +17,10 @@ namespace HellpitRampage.Inventory
 
         private void Start()
         {
+            // WS-013: when resuming a saved run, RunRestoreController owns the inventory
+            // population. Bail before we wipe its work or seed duplicate starting gear.
+            if (GameManager.Instance != null && GameManager.Instance.PendingResume != null) return;
+
             if (InventoryService.Instance == null)
             {
                 Debug.LogError("HeroStartingLoadout: InventoryService.Instance is null.");

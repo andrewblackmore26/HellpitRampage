@@ -12,6 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 01a2b3c4d5e6f70819203142536475a8, type: 3}
   m_Name: Whetstone_Item
   m_EditorClassIdentifier:
+  _id: whetstone
   ItemName: Whetstone
   Description: A simple stone, smooth and patient. Sharpens what it touches.
   Icon: {fileID: 0}

@@ -1,12 +1,12 @@
 using HellpitRampage.Core;
+using TMPro;
 using UnityEngine;
-using UnityEngine.UI;
 
 namespace HellpitRampage.UI
 {
     public class GoldDisplayController : MonoBehaviour
     {
-        [SerializeField] private Text _label;
+        [SerializeField] private TextMeshProUGUI _label;
 
         private void OnEnable()
         {

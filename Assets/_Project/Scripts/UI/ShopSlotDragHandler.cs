@@ -45,7 +45,9 @@ namespace HellpitRampage.UI
             _currentRotation = Rotation.Deg0;
             Active = this;
 
-            if (Tooltip.Instance != null) Tooltip.Instance.Hide();
+            // Shop drags don't publish ItemDragBeganEvent (no ItemInstance exists yet), so the
+            // tooltip controller can't auto-dismiss via its event subscription. Direct call.
+            if (TooltipController.Current != null) TooltipController.Current.Unpin();
 
             Canvas canvas = GetComponentInParent<Canvas>();
             if (canvas == null) { _dragging = false; return; }
@@ -59,6 +61,11 @@ namespace HellpitRampage.UI
                 img.color = new Color(0.9f, 0.85f, 0.6f, 0.7f);
                 img.raycastTarget = false;
             }
+
+            // WS-012.7: rebuild the cursor ghost to render the item's full multi-cell shape
+            // (mirrors DragHandler.RebuildDraggedVisualForRotation). Items only — bags keep
+            // the single-cell yellow ghost since their footprint is implicit in placement.
+            RebuildGhostVisual();
         }
 
         public void OnDrag(PointerEventData eventData)
@@ -103,7 +110,31 @@ namespace HellpitRampage.UI
         private void Rotate()
         {
             _currentRotation = ShapeMath.Next(_currentRotation);
+            RebuildGhostVisual();
             UpdateValidationOverlay();
+        }
+
+        // WS-012.7: rebuild the multi-cell cursor ghost when drag begins or rotation changes.
+        // Mirrors DragHandler.RebuildDraggedVisualForRotation so a Hollow Crown (2x2) or
+        // Bone Knife (1x2) renders its real footprint at the cursor instead of a 1x1 tile.
+        // Suppresses the prefab's root Image (alpha 0) so only the rebuilt cell children render.
+        private void RebuildGhostVisual()
+        {
+            if (_draggedOffer is not ItemData itemData) return;
+            if (itemData.Shape == null) return;
+            if (_gridView == null || _ghostRT == null) return;
+
+            var rotated = ShapeMath.Rotate(itemData.Shape.Cells, _currentRotation);
+            if (rotated.Count == 0) return;
+
+            int maxX = 0, maxY = 0;
+            foreach (var c in rotated) { if (c.x > maxX) maxX = c.x; if (c.y > maxY) maxY = c.y; }
+            _ghostRT.sizeDelta = new Vector2((maxX + 1) * CELL_SIZE_PX, (maxY + 1) * CELL_SIZE_PX);
+
+            var rootImg = _ghostInstance != null ? _ghostInstance.GetComponent<Image>() : null;
+            if (rootImg != null) rootImg.color = new Color(0f, 0f, 0f, 0f);
+
+            _gridView.BuildItemCellChildren(_ghostRT, rotated, itemData);
         }
 
         public void OnEndDrag(PointerEventData eventData)

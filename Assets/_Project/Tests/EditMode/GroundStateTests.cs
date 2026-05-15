@@ -24,7 +24,7 @@ namespace HellpitRampage.Tests
         [Test]
         public void GroundItemSnapshot_PreservesAllFields()
         {
-            var snap = MakeSnapshot("Test", Rotation.Deg90, isLocked: true);
+            var snap = MakeSnapshot("Test", Rotation.Deg90, locked: true);
             Assert.IsNotNull(snap.ItemId);
             Assert.AreEqual("Test", snap.ItemId.ItemName);
             Assert.AreEqual(Rotation.Deg90, snap.Rotation);

@@ -51,7 +51,15 @@ namespace HellpitRampage.Core
                 pool = CreatePool(prefab);
             }
 
-            return pool.Get();
+            GameObject instance = pool.Get();
+            // The instance is now checked out — clear the pool-membership flag so a later
+            // Release is accepted exactly once.
+            if (instance != null)
+            {
+                PooledObject marker = instance.GetComponent<PooledObject>();
+                if (marker != null) marker.IsPooled = false;
+            }
+            return instance;
         }
 
         public void Release(GameObject instance)
@@ -77,6 +85,18 @@ namespace HellpitRampage.Core
                 return;
             }
 
+            // Pool-level idempotency. A consumer's own despawn guard (e.g. Projectile._isDespawned)
+            // is reset by OnEnable, so it cannot catch a double-release where the instance was
+            // re-activated out of band between the two releases (scene/domain reload). This flag
+            // is the pool's own source of truth — skip the redundant pool.Release so ObjectPool's
+            // collectionCheck (kept ON, per L-005) only ever fires on a genuinely new bug.
+            if (marker.IsPooled)
+            {
+                Debug.LogWarning($"PoolManager.Release: instance '{instance.name}' is already in its pool; ignoring redundant release.");
+                return;
+            }
+            marker.IsPooled = true;
+
             pool.Release(instance);
         }
 
@@ -94,10 +114,20 @@ namespace HellpitRampage.Core
                 pool = CreatePool(prefab);
             }
 
-            // Round-trip Get/Release so the pool's internal stack is seeded.
+            // Round-trip Get/Release so the pool's internal stack is seeded. Keep each marker's
+            // IsPooled flag truthful so the very first real Release after prewarm isn't seen as
+            // a redundant release.
             var temp = new GameObject[count];
             for (int i = 0; i < count; i++) temp[i] = pool.Get();
-            for (int i = 0; i < count; i++) pool.Release(temp[i]);
+            for (int i = 0; i < count; i++)
+            {
+                pool.Release(temp[i]);
+                if (temp[i] != null)
+                {
+                    PooledObject marker = temp[i].GetComponent<PooledObject>();
+                    if (marker != null) marker.IsPooled = true;
+                }
+            }
         }
 
         private ObjectPool<GameObject> CreatePool(GameObject prefab)

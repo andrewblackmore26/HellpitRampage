@@ -50,7 +50,6 @@ namespace HellpitRampage.UI
         public void OnBeginDrag(PointerEventData eventData)
         {
             if (_rt == null) return;
-            if (Tooltip.Instance != null) Tooltip.Instance.Hide();
             _dragging = true;
             _dropCommitted = false;
             Active = this;

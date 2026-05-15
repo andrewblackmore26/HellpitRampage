@@ -22,6 +22,27 @@ namespace HellpitRampage.Inventory
             if (Instance == this) Instance = null;
         }
 
+        // WS-013: full reset before a run-restore. Bypasses per-item event publishing because
+        // the restore controller rebuilds the grid in one batch and the UI redraws from the
+        // resulting state — emitting N removal events would only thrash the renderer. We still
+        // publish a single BagRemovedEvent per bag at the end so downstream listeners (e.g.,
+        // gold display, synergy resolver) reset cleanly.
+        public void ClearAll()
+        {
+            if (Grid == null) return;
+
+            // Snapshot bags before clearing so we can publish post-clear without iterating a
+            // mutating collection.
+            var bagsToNotify = new List<BagInstance>(Grid.Bags);
+            Grid.Clear();
+
+            if (EventBus.Instance != null)
+            {
+                foreach (var bag in bagsToNotify)
+                    EventBus.Instance.Publish(new BagRemovedEvent { Bag = bag });
+            }
+        }
+
         public BagInstance PlaceBag(BagData data, Vector2Int origin)
         {
             BagInstance bag = Grid.PlaceBag(data, origin);

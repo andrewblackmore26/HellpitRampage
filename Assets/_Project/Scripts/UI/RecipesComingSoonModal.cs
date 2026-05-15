@@ -1,3 +1,4 @@
+using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -107,7 +108,7 @@ namespace HellpitRampage.UI
 
         private void BuildLabel(RectTransform parent)
         {
-            var labelGO = new GameObject("Message", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+            var labelGO = new GameObject("Message", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
             labelGO.transform.SetParent(parent, false);
             var rt = (RectTransform)labelGO.transform;
             rt.anchorMin = new Vector2(0f, 0.4f);
@@ -115,15 +116,15 @@ namespace HellpitRampage.UI
             rt.offsetMin = new Vector2(12f, 0f);
             rt.offsetMax = new Vector2(-12f, -12f);
 
-            var text = labelGO.GetComponent<Text>();
+            var text = labelGO.GetComponent<TextMeshProUGUI>();
+            text.font = TMP_Settings.defaultFontAsset;
             text.text = "Recipes for this item — coming soon";
-            text.alignment = TextAnchor.MiddleCenter;
+            text.alignment = TextAlignmentOptions.Center;
             text.color = Color.white;
             text.fontSize = 18;
-            text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             text.raycastTarget = false;
-            text.horizontalOverflow = HorizontalWrapMode.Wrap;
-            text.verticalOverflow = VerticalWrapMode.Overflow;
+            text.textWrappingMode = TextWrappingModes.Normal;
+            text.overflowMode = TextOverflowModes.Overflow;
         }
 
         private void BuildOKButton(RectTransform parent)
@@ -144,7 +145,7 @@ namespace HellpitRampage.UI
             _okButton = btnGO.GetComponent<Button>();
             _okButton.targetGraphic = img;
 
-            var labelGO = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+            var labelGO = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
             labelGO.transform.SetParent(rt, false);
             var lrt = (RectTransform)labelGO.transform;
             lrt.anchorMin = Vector2.zero;
@@ -152,13 +153,13 @@ namespace HellpitRampage.UI
             lrt.offsetMin = Vector2.zero;
             lrt.offsetMax = Vector2.zero;
 
-            var text = labelGO.GetComponent<Text>();
+            var text = labelGO.GetComponent<TextMeshProUGUI>();
+            text.font = TMP_Settings.defaultFontAsset;
             text.text = "OK";
-            text.alignment = TextAnchor.MiddleCenter;
+            text.alignment = TextAlignmentOptions.Center;
             text.color = Color.white;
             text.fontSize = 16;
-            text.fontStyle = FontStyle.Bold;
-            text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            text.fontStyle = FontStyles.Bold;
             text.raycastTarget = false;
         }
 

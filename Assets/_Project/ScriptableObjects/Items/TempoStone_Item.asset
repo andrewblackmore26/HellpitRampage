@@ -12,6 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 01a2b3c4d5e6f70819203142536475a8, type: 3}
   m_Name: TempoStone_Item
   m_EditorClassIdentifier:
+  _id: tempo_stone
   ItemName: Tempo Stone
   Description: A pebble that hums in rhythm. Quickens weapons set beside it.
   Icon: {fileID: 0}

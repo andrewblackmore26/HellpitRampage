@@ -12,6 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1a2b3c4d5e6f708192030405060708a1, type: 3}
   m_Name: WardenPouch_Bag
   m_EditorClassIdentifier:
+  _id: warden_pouch
   BagName: Warden's Pouch
   Icon: {fileID: 0}
   Shape: {fileID: 11400000, guid: 1b2c3d4e5f60718293040506070809b1, type: 2}
