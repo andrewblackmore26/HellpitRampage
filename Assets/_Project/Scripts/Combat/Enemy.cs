@@ -13,11 +13,20 @@ namespace HellpitRampage.Combat
         private Transform _playerTransform;
         private float _contactDamageCooldown;
 
+        // WS-014.B: prefab-default visual state, captured once so a per-spawn override
+        // (the round-30 boss scales/tints this prefab) never leaks via the shared pool.
+        private SpriteRenderer _spriteRenderer;
+        private Vector3 _defaultScale;
+        private Color _defaultColor;
+
         public EnemyData Data => _data;
 
         private void Awake()
         {
             _rb = GetComponent<Rigidbody2D>();
+            _spriteRenderer = GetComponentInChildren<SpriteRenderer>();
+            _defaultScale = transform.localScale;
+            if (_spriteRenderer != null) _defaultColor = _spriteRenderer.color;
         }
 
         private void OnEnable()
@@ -33,6 +42,12 @@ namespace HellpitRampage.Combat
             _playerTransform = playerTransform;
             // Reset velocity from any previous pool usage. Pool deactivation does NOT clear Rigidbody state.
             if (_rb != null) _rb.linearVelocity = Vector2.zero;
+
+            // WS-014.B: restore the prefab's default scale/tint. The round-30 boss reuses
+            // this prefab with a scale/tint override; resetting here keeps that override
+            // from leaking to a later spawn (e.g. a fresh run) via the shared pool.
+            transform.localScale = _defaultScale;
+            if (_spriteRenderer != null) _spriteRenderer.color = _defaultColor;
 
             // Seed Health from data, overriding the prefab's default StartingHP.
             Health health = GetComponent<Health>();

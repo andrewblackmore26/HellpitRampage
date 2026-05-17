@@ -1471,6 +1471,133 @@ tells you migration is incomplete; only the type check tells you whether incompl
 
 ---
 
+## L-023 — A spec's "gotcha" or current-state claim can be factually wrong; verify behavioural claims against the code
+
+**Surfaced during:** WS-014.B planning. The spec's Known-Gotcha #2 stated, in bold, that
+`RunEndedEvent` "is NOT currently published on victory" and instructed the implementer to
+add the publisher. It is published — `RunManager.EndCurrentRound()` calls
+`EndRun(victory: true)` whenever `CurrentRound >= _totalRounds`, and a unit test
+(`RunManagerTests.EndCurrentRound_OnLastRound_PublishesRunEndedWithVictoryTrue`) already
+asserts it. Building on the spec's claim would have produced a *second* victory publisher
+and a round-30 design that fights the existing timer-victory.
+
+**The mistake:** treating a spec's description of *current behaviour* ("X is not done",
+"Y always happens", "Z is never published") as fact. A spec author writes those claims
+from memory or from an older state of the repo; they are exactly as stale as the
+component names L-015 warns about — but more dangerous, because a wrong *behavioural*
+claim doesn't fail to compile, it ships a duplicated or conflicting system.
+
+**The fix:** every "currently X" / "is not Y" / "always Z" assertion in a spec is a
+hypothesis to verify, not a premise. Before building on it, grep for the publisher /
+caller and read it. If a unit test names the behaviour, that test is ground truth.
+Surface the correction as a planning deviation.
+
+**When this applies:**
+- Any spec "Known Gotchas" / "Pre-flight" / "Notes" section that asserts what the code
+  currently does or does not do.
+- Especially claims of absence ("no publisher exists", "this is never called") — absence
+  is the easiest thing to be wrong about and the costliest to assume.
+
+**Resist:** "the spec is detailed and confident, surely it checked." Detail and
+confidence are not verification. The repo is canonical (CLAUDE.md §8); the spec is a
+proposal.
+
+---
+
+## L-024 — A per-spawn visual override on a pooled object must be reset in its `Initialize`, or it leaks across runs
+
+**Surfaced during:** WS-014.B. The round-30 boss reuses the basic-enemy prefab, scaled ×3
+and tinted dark red at spawn (no separate boss prefab). `PoolManager` is a Boot-scene
+singleton that persists across scene loads — so the boss instance, once released back to
+the pool, would be handed out by `Get()` on a *later run's* round 1 as a giant red
+"basic enemy".
+
+**The mistake:** assuming a per-spawn override is harmless because "this round is the
+last one". Pools outlive scenes and runs. Any mutation applied to a pooled instance after
+checkout (scale, tint, sorting layer, attached components) is still there on the next
+checkout unless something resets it.
+
+**The fix:** capture the prefab-default state once in `Awake` (runs once, at first
+instantiation, before any override) and restore it in the per-spawn `Initialize` /
+reset path. Then the override is applied *after* `Initialize`, and the next checkout
+starts clean regardless.
+
+```csharp
+private Vector3 _defaultScale;
+private Color _defaultColor;
+private SpriteRenderer _spriteRenderer;
+
+private void Awake()
+{
+    _spriteRenderer = GetComponentInChildren<SpriteRenderer>();
+    _defaultScale = transform.localScale;
+    if (_spriteRenderer != null) _defaultColor = _spriteRenderer.color;
+}
+
+public void Initialize(/* ... */)
+{
+    transform.localScale = _defaultScale;
+    if (_spriteRenderer != null) _spriteRenderer.color = _defaultColor;
+    // ... caller may now apply a per-spawn override on top.
+}
+```
+
+**When this applies:**
+- Any pooled prefab reused with a per-instance visual/behavioural override (the cheap way
+  to make a "boss" or an "elite" out of a base enemy).
+- Sibling of L-005 (guard double-release) and L-020 (guard re-activation): pooled-object
+  hygiene — what you reset on checkout is as important as what you guard on release.
+
+**Resist:** "round 30 is terminal, it can't leak." It leaks into the *next run* — the
+pool, not the scene, owns the instance's lifetime.
+
+---
+
+## L-025 — Publishing an event synchronously inside another event's handler races handler ordering; defer a frame
+
+**Surfaced during:** WS-014.B. `CompanionAppearanceScheduler` and `CombatRoundController`
+both subscribe to `RoundStartedEvent`. The orchestrator records the pending round in its
+handler; the scheduler, for the "silent" rounds 23-24, published
+`CompanionAppearanceCompleteEvent` *synchronously inside its own `RoundStartedEvent`
+handler*. `EventBus` dispatches handlers in subscription order, so this only worked
+because the orchestrator happened to subscribe first (it is a scene object; the scheduler
+is created later in `Start()`). If that order ever flipped, the complete event would fire
+*before* the orchestrator recorded the round → combat never starts → soft-lock.
+
+**The mistake:** treating "publish B" inside the handler for A as ordering-free. It is
+re-entrant dispatch: every A-subscriber after the current one, and every B-subscriber,
+runs nested — and whether the *other* A-subscribers have run yet depends on subscription
+order, which is incidental.
+
+**The fix:** if handler-for-A needs to publish B, and any B-subscriber also subscribes to
+A, defer the publish by one frame (`yield return null` in a coroutine, then publish). All
+A-handlers have then completed; ordering no longer matters.
+
+```csharp
+private void HandleRoundStarted(RoundStartedEvent e)
+{
+    if (/* must publish a follow-up event now */)
+        StartCoroutine(PublishNextFrame());
+}
+
+private static IEnumerator PublishNextFrame()
+{
+    yield return null;
+    EventBus.Instance?.Publish(new FollowUpEvent());
+}
+```
+
+**When this applies:**
+- Any "this event triggers that event immediately" chain where producers and consumers
+  share an upstream event.
+- Coroutine-driven publishers (e.g. a UI that shows for N seconds then publishes) are
+  already safe — they always yield first.
+
+**Resist:** "it works, the order is fine." It works *by accident of subscription order*.
+A defer makes it correct by construction.
+
+---
+
 ## Meta — when capturing a new lesson
 
 1. Number it (`L-NNN`) so future references stay stable.

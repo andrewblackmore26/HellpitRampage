@@ -1,4 +1,5 @@
 using HellpitRampage.Core;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -55,6 +56,25 @@ namespace HellpitRampage.UI
             if (_resumeRunButton == null) return;
             bool hasSave = SaveManager.Instance != null && SaveManager.Instance.HasRunSave();
             _resumeRunButton.gameObject.SetActive(hasSave);
+            if (!hasSave) return;
+
+            // WS-014.B: surface what the save resumes into, folded into the button label
+            // so no extra UI element needs wiring.
+            var label = _resumeRunButton.GetComponentInChildren<TextMeshProUGUI>();
+            if (label == null) return;
+
+            string text = "Continue Run";
+            RunSaveData data = SaveManager.Instance.LoadRun();
+            if (data != null)
+            {
+                string heroName = "Unknown";
+                HeroData hero = DataRegistry.Instance != null
+                    ? DataRegistry.Instance.GetHero(data.HeroId)
+                    : null;
+                if (hero != null) heroName = hero.DisplayName;
+                text = $"Continue Run\nRound {data.CurrentRound} · {data.Gold}g · {heroName}";
+            }
+            label.text = text;
         }
 
         private void OnStartRunClicked()

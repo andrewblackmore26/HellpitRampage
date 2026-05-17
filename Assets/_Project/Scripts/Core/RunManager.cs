@@ -149,6 +149,18 @@ namespace HellpitRampage.Core
             EndRun(victory: false);
         }
 
+        /// <summary>
+        /// WS-014.B: ends the run as a victory. Called by CombatRoundController when the
+        /// round-30 boss is defeated. Round 30 runs no round timer, so the timed-victory
+        /// path in <see cref="EndCurrentRound"/> is bypassed and this is the win trigger.
+        /// Idempotent — a no-op once the run has already ended.
+        /// </summary>
+        public void EndRunVictory()
+        {
+            if (CurrentPhase == RunPhase.RunEnd) return;
+            EndRun(victory: true);
+        }
+
         private void EndRun(bool victory)
         {
             CurrentPhase = RunPhase.RunEnd;

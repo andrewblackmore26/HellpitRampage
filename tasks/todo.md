@@ -532,3 +532,93 @@ WS-014.A complete. Audit doc at `tasks/ws_014_a_audit.md`.
 **Verification limits:** static analysis only; Unity could not run. Both fixes need a Play-mode confirmation. Resume remains edge-case fragile (H-4/H-5 deferred).
 
 **Lessons captured:** L-021 (deferred manual-wiring steps get forgotten — prefer code-resolved input), L-022 (a migration not run on scenes is functional, not cosmetic, when the field type changed).
+
+---
+
+# WS-014.B — First Playable: Run-End Loop + Companion/Biome Placeholders + Asset Infrastructure
+
+Spec: `WS-014_B_First_Playable.md` (provided inline by designer 2026-05-16).
+Plan: `~/.claude/plans/fluttering-hopping-flute.md` (approved).
+Status: **code complete on disk — awaiting designer EditMode run + playtest, then commit.**
+
+## Method
+
+Audited the spec against the codebase (3 parallel Explore subagents + direct reads of
+the run / combat / save / UI systems). The spec was drafted against several stale
+assumptions; reconciled them and surfaced 14 deviations at planning — 3 confirmed with
+the designer via question, the rest decided on minimal-impact grounds. Implementation
+touches C# + 2 `.asset` files only — **zero scene-YAML edits** (composition is
+code-driven, per L-021).
+
+## New files
+
+- `Scripts/Core/Events/CompanionAppearanceCompleteEvent.cs` — event gating combat start behind the companion beat.
+- `Scripts/Narrative/CompanionAppearanceScheduler.cs` — round→state mapping; shows the companion or publishes the complete event; builds + owns its UI.
+- `Scripts/Narrative/CompanionPlaceholderUI.cs` — code-built portrait + subtitle; grace timer, click/key dismiss, round-22 glitch.
+- `Scripts/Environment/BiomeTransitionController.cs` — tints the camera background per biome.
+- `Tests/EditMode/CompanionStateMappingTests.cs` — 4 tests.
+- `Tests/EditMode/BiomeTransitionTests.cs` — 3 tests.
+- `ScriptableObjects/Enemies/CompanionDevilBoss_Enemy.asset` (+ `.meta`) — boss EnemyData: id `boss_companion_devil_placeholder`, 800 HP, MoveSpeed 1.5, ContactDamage 8; reuses `Enemy.prefab`.
+- `Assets/_Project/{Art,Audio,Text}/…` — 17 asset folders, each with a `README.md` spec.
+
+## Edited files
+
+- `Scripts/Core/RunManager.cs` — added public `EndRunVictory()` (idempotent victory trigger).
+- `Scripts/Combat/CombatRoundController.cs` — combat now waits for `CompanionAppearanceCompleteEvent`; round 30 spawns the boss (no timer); boss death → `RunManager.EndRunVictory()`.
+- `Scripts/Combat/EnemySpawner.cs` — removed the `_spawnOnStart` self-start (and the now-dead field). Spawning is driven solely by `CombatRoundController`; a self-start would race the companion-gating depending on `Start()` order.
+- `Scripts/Combat/Enemy.cs` — captures prefab-default scale/tint in Awake, restores them in `Initialize` (so the boss's scale/tint override can't leak via the shared pool).
+- `Scripts/Core/GameSceneBootstrap.cs` — composition root: instantiates the companion + biome controllers in code (always — fresh run and resume).
+- `Scripts/UI/RunEndOverlayController.cs` — code-builds a Try-Again button (death) + victory subtitle; relabels return button "Main Menu"; death header shows the round.
+- `Scripts/UI/MainMenuController.cs` — Continue Run button label becomes multi-line `Round X · Yg · Hero`.
+- `ScriptableObjects/DataManifest.asset` — registered the boss EnemyData (guid `b0551423a4b5c6d7e8f9a0b1c2d3e4f0`).
+
+## Scene / asset YAML
+
+No `.unity` scene edited. Only `DataManifest.asset` (+ the new boss `.asset` / `.meta`).
+All new controllers are code-instantiated; all SerializeField bindings on edited
+components kept their names so existing scene wiring is preserved untouched.
+
+## Tests
+
+7 new EditMode tests. Expected total **157 → 164**. Not run here (no batch-mode Unity —
+designer runs the suite).
+
+## Deviations from spec (full rationale in the approved plan file)
+
+- **D1** Run-end UI — extended the existing `RunEndOverlayController` instead of new `DeathScreen`/`VictoryScreen` (designer-confirmed).
+- **D2** Round 30 — boss fight with no round timer; the spec's gotcha #2 ("victory never published") was wrong — `RunManager.EndCurrentRound` already published it on the round-30 timer (designer-confirmed).
+- **D3** Boss visual — reused `Enemy.prefab` scaled ×3 + tinted dark red; no new prefab/PNG (designer-confirmed).
+- **D4** Kept `RunEndedEvent.bool Victory`; did not add the `RunEndReason` enum (zero functional gain this spec).
+- **D5** Victory published by `RunManager.EndRunVictory()`, not the spawner — keeps `RunManager` the sole publisher and `CurrentPhase` correct.
+- **D6** `EnemyDiedEvent` left unchanged; round 30 is boss-only so any enemy death during the boss encounter = the boss.
+- **D7** Spawner is `EnemySpawner` + `CombatRoundController`; round integration landed in `CombatRoundController`. *Plan said `EnemySpawner.cs` would be untouched — corrected during implementation:* its `_spawnOnStart` self-start had to be removed, or it would spawn during the companion grace regardless of the gating (and the `Start()`-order race made it nondeterministic).
+- **D8** Biome = `Camera.backgroundColor` (forces SolidColor clear); there is no backdrop GameObject.
+- **D9** Used `GameManager.TransitionTo` — `StartNewRunWithHero`/`ReturnToMainMenu` do not exist; single hero, so Try-Again = a fresh run.
+- **D10** All new UI/controllers code-driven; zero scene-YAML edits, no deferred Inspector wiring.
+- **D11** No PNG placeholders generated — boss reuses a tinted prefab, companion portrait is a code-tinted Image.
+- **D12** Event in its own file (`Core/Events/`); test namespace `HellpitRampage.Tests`.
+- **D13** Continue Run preview folded into the button label (no separate element to wire).
+- **D14** No GDD exists — implemented only from values inlined in the spec; README "GDD reference" lines kept as forward refs.
+- **Extra (in-spirit, beyond the 14):** `BiomeTransitionController` also listens to `ShopPhaseStartedEvent` so a resumed run gets the right backdrop; `CompanionAppearanceScheduler` defers the silent-round complete event one frame to avoid a handler-ordering race; `Enemy.cs` scale/tint reset (D3 pool hygiene).
+
+## Required manual Unity Editor steps
+
+- **No wiring required.** Let Unity reimport on focus (new boss `.asset`/`.meta` + `DataManifest.asset`).
+- Run the EditMode suite — expect **164** green.
+- Playtest §5.1: full 30-round run → boss → Victory; the Death path + Try-Again; pause; resume.
+- Confirm the Main Camera's clear flags are Solid Color (the controller forces this — just verify the biome tint shows).
+
+## New lessons captured this session
+
+L-023 (a spec's "gotcha" can be factually wrong — verify behavioural claims against the
+code), L-024 (a per-spawn visual override on a pooled object must be reset in its
+Initialize or it leaks across runs), L-025 (publishing an event synchronously inside
+another event's dispatch races handler ordering — defer a frame).
+
+## Review
+
+WS-014.B implementation is **code complete on disk, not yet playtested or committed.**
+Per CLAUDE.md a spec is not done until the designer's manual playtest passes — that
+gate is outstanding. Static cross-reference review done: every new API call checked
+against the real signatures; no scene wiring left dangling; existing SerializeField
+names preserved. Content audit: `tasks/content_audit_post_ws014b.md`.

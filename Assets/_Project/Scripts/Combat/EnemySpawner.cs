@@ -22,9 +22,6 @@ namespace HellpitRampage.Combat
         [Header("Pool")]
         [SerializeField] private int _prewarmCount = 20;
 
-        [Header("Control")]
-        [SerializeField] private bool _spawnOnStart = true;
-
         private float _spawnAccumulator;
         private bool _spawning;
 
@@ -34,7 +31,9 @@ namespace HellpitRampage.Combat
             {
                 PoolManager.Instance.Prewarm(_enemyData.Prefab, _prewarmCount);
             }
-            if (_spawnOnStart) StartSpawning();
+            // WS-014.B: spawning is driven exclusively by CombatRoundController (it starts
+            // only after the companion appearance completes). No self-start here — a
+            // self-start would race the round-start gating depending on Start() order.
         }
 
         public void StartSpawning() => _spawning = true;
