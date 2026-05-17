@@ -11,6 +11,8 @@ namespace HellpitRampage.Core
         [SerializeField] private int _totalRounds = 30;
         [SerializeField] private int _startingGold = 10;
         [SerializeField] private int _roundEndBonusGold = 5;
+        // WS-015: fresh-run player HP. HeroData carries no HP stat yet (WS-018+ hero spec).
+        [SerializeField] private float _startingPlayerHp = 100f;
 
         // WS-013: hero scaffolding. Single hero today; multi-hero unlocks fill this meaningfully later.
         [SerializeField] private HeroData _defaultHero;
@@ -20,6 +22,12 @@ namespace HellpitRampage.Core
         public int TotalRounds => _totalRounds;
         public int CurrentGold { get; private set; }
         public HeroData CurrentHero { get; private set; }
+
+        // WS-015: player HP is owned here so it carries across the Combat<->Shop scene
+        // transitions (the player GameObject is destroyed on every scene unload). The Combat
+        // scene's Health component is seeded from these and writes CurrentHp back on damage.
+        public float CurrentHp { get; set; }
+        public float MaxHp { get; private set; }
 
         private void Awake()
         {
@@ -58,6 +66,9 @@ namespace HellpitRampage.Core
             CurrentPhase = RunPhase.Combat;
             CurrentHero = _defaultHero;
 
+            MaxHp = _startingPlayerHp;
+            CurrentHp = _startingPlayerHp;
+
             int oldGold = CurrentGold;
             CurrentGold = _startingGold;
 
@@ -66,20 +77,25 @@ namespace HellpitRampage.Core
                 // Publish gold first so GoldDisplay shows "Gold: 10" before any subscriber reacts to RunStarted.
                 EventBus.Instance.Publish(new GoldChangedEvent { OldAmount = oldGold, NewAmount = CurrentGold });
                 EventBus.Instance.Publish(new RunStartedEvent());
-                EventBus.Instance.Publish(new RoundStartedEvent { RoundNumber = CurrentRound });
+                // WS-015: RoundStartedEvent is published by CombatSceneBootstrap once the
+                // Combat scene has loaded — combat-scene subscribers don't exist yet here.
             }
         }
 
         /// <summary>
         /// WS-013: restores run state from a save without re-firing RunStarted / RoundStarted.
         /// Phase is set to Shop because saves only happen at shop-phase entry, so the player
-        /// always resumes there. Publishes GoldChangedEvent so UI repaints.
+        /// always resumes there. WS-015: also restores the carried player HP. Publishes
+        /// GoldChangedEvent so UI repaints.
         /// </summary>
-        public void RestoreFromSave(int round, int gold, HeroData hero)
+        public void RestoreFromSave(int round, int gold, HeroData hero, float currentHp, float maxHp)
         {
             CurrentRound = Mathf.Clamp(round, 1, _totalRounds);
             CurrentPhase = RunPhase.Shop;
             CurrentHero = hero != null ? hero : _defaultHero;
+
+            MaxHp = maxHp > 0f ? maxHp : _startingPlayerHp;
+            CurrentHp = Mathf.Clamp(currentHp, 0f, MaxHp);
 
             int oldGold = CurrentGold;
             CurrentGold = Mathf.Max(0, gold);
@@ -94,22 +110,23 @@ namespace HellpitRampage.Core
             CurrentPhase = RunPhase.Shop;
             bool runEnding = CurrentRound >= _totalRounds;
 
+            // RoundEndedEvent drives in-scene combat cleanup (spawner stop, enemy/projectile
+            // clear, gold sweep) — published while the Combat scene is still loaded.
             if (EventBus.Instance != null)
-            {
                 EventBus.Instance.Publish(new RoundEndedEvent { RoundNumber = CurrentRound });
-                // WS-012.5: explicit shop-phase signal. GoldFieldSweeper already cleans the field
-                // on RoundEndedEvent; ShopPhaseStartedEvent is for shop-only UI (GroundArea,
-                // DragModeService reset to Items) that needs to know "the shop is now open."
-                // Suppressed on the final round so RunEnd overlay isn't competing with a stale shop.
-                if (!runEnding)
-                    EventBus.Instance.Publish(new ShopPhaseStartedEvent { RoundNumber = CurrentRound });
+
+            if (runEnding)
+            {
+                // Final round: the run-end overlay takes over — no shop, no bonus gold.
+                EndRun(victory: true);
+                return;
             }
 
-            // Round-end gold reward, but only if the run continues. On the final round the run-end
-            // overlay takes over, so awarding gold post-victory would refresh a dead shop.
-            if (!runEnding) AddGold(_roundEndBonusGold);
+            AddGold(_roundEndBonusGold);
 
-            if (runEnding) EndRun(victory: true);
+            // WS-015: the shop is its own scene now. Load it; ShopSceneBootstrap publishes
+            // ShopPhaseStartedEvent once it is live (drives auto-save, GroundArea, drag mode).
+            if (SceneRouter.Instance != null) SceneRouter.Instance.LoadShop();
         }
 
         public void AdvanceToNextRound()
@@ -117,12 +134,12 @@ namespace HellpitRampage.Core
             if (CurrentPhase != RunPhase.Shop) return;
             if (CurrentRound >= _totalRounds) return;
 
-            // Gotcha #9: increment BEFORE publish so handlers see the new round number.
             CurrentRound++;
             CurrentPhase = RunPhase.Combat;
 
-            if (EventBus.Instance != null)
-                EventBus.Instance.Publish(new RoundStartedEvent { RoundNumber = CurrentRound });
+            // WS-015: load the Combat scene; CombatSceneBootstrap publishes RoundStartedEvent
+            // once it is live, so combat-scene subscribers receive it in their own scene.
+            if (SceneRouter.Instance != null) SceneRouter.Instance.LoadCombat();
         }
 
         public void AddGold(int amount)

@@ -7,7 +7,7 @@ namespace HellpitRampage.Environment
     /// WS-014.B: placeholder biome system. Tints the camera background per the round's
     /// biome (Outskirts 1-10, Inner Town 11-20, Depths 21-30). Instant colour set, no
     /// animation — real biome art replaces this entirely later. Scene-scoped component;
-    /// instantiated in code by <see cref="HellpitRampage.Core.GameSceneBootstrap"/>.
+    /// instantiated in code by <see cref="HellpitRampage.Core.CombatSceneBootstrap"/>.
     /// </summary>
     public class BiomeTransitionController : MonoBehaviour
     {

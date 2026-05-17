@@ -66,6 +66,10 @@ namespace HellpitRampage.Combat
             if (amount <= 0f) return;
 
             _currentHP = Mathf.Max(0f, _currentHP - amount);
+            // WS-015: the player's HP is owned by RunManager so it carries across the
+            // Combat<->Shop scene transitions — mirror every change back to the canonical value.
+            if (_owner == Owner.Player && RunManager.Instance != null)
+                RunManager.Instance.CurrentHp = _currentHP;
             OnHealthChanged?.Invoke(_currentHP, _maxHP);
 
             if (_currentHP <= 0f) HandleDeath();

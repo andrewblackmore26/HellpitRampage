@@ -87,11 +87,13 @@ namespace HellpitRampage.UI
         private void HandleTryAgainClicked()
         {
             Time.timeScale = 1f;
-            // SaveManager already deletes the run save on RunEndedEvent; this is a defensive
-            // idempotent repeat so a retry can never resume into stale state.
+            // SaveManager already deletes the run save on RunEndedEvent; defensive idempotent repeat.
             SaveManager.Instance?.DeleteRunSave();
-            if (GameManager.Instance != null)
-                GameManager.Instance.TransitionTo(GameManager.GameState.InRun);
+            // WS-015: reload the Combat scene for a fresh run. CombatSceneBootstrap sees the
+            // run is no longer in the Combat phase (it is RunEnd) and starts a new run at
+            // round 1. Routed via SceneRouter — CurrentState is already InRun, so a
+            // GameManager state transition would be a no-op.
+            if (SceneRouter.Instance != null) SceneRouter.Instance.LoadCombat();
         }
 
         // ====================================================================

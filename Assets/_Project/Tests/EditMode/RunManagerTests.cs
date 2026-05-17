@@ -50,29 +50,19 @@ namespace HellpitRampage.Tests
         }
 
         [Test]
-        public void StartNewRun_PublishesRunStartedAndRoundStartedEvents()
+        public void StartNewRun_PublishesRunStartedEvent()
         {
+            // WS-015: StartNewRun publishes RunStartedEvent; RoundStartedEvent is now
+            // published by CombatSceneBootstrap once the Combat scene has loaded.
             int runStartedCount = 0;
-            int roundStartedCount = 0;
-            int observedRoundNumber = -1;
-
             System.Action<RunStartedEvent> runHandler = _ => runStartedCount++;
-            System.Action<RoundStartedEvent> roundHandler = evt =>
-            {
-                roundStartedCount++;
-                observedRoundNumber = evt.RoundNumber;
-            };
             EventBus.Instance.Subscribe(runHandler);
-            EventBus.Instance.Subscribe(roundHandler);
 
             _runManager.StartNewRun();
 
             Assert.AreEqual(1, runStartedCount, "RunStartedEvent must fire exactly once.");
-            Assert.AreEqual(1, roundStartedCount, "RoundStartedEvent must fire exactly once.");
-            Assert.AreEqual(1, observedRoundNumber, "RoundStartedEvent.RoundNumber must equal 1 on a fresh run.");
 
             EventBus.Instance.Unsubscribe(runHandler);
-            EventBus.Instance.Unsubscribe(roundHandler);
         }
 
         [Test]
@@ -100,25 +90,15 @@ namespace HellpitRampage.Tests
         [Test]
         public void AdvanceToNextRound_IncrementsAndReturnsToCombat()
         {
-            int roundStartedCount = 0;
-            int lastRoundNumber = -1;
-            System.Action<RoundStartedEvent> handler = evt =>
-            {
-                roundStartedCount++;
-                lastRoundNumber = evt.RoundNumber;
-            };
-            EventBus.Instance.Subscribe(handler);
-
-            _runManager.StartNewRun();    // publishes RoundStartedEvent{1}
+            // WS-015: AdvanceToNextRound increments the round and re-enters the Combat
+            // phase, then loads the Combat scene via SceneRouter (null/no-op in EditMode).
+            // RoundStartedEvent is published by CombatSceneBootstrap, not here.
+            _runManager.StartNewRun();
             _runManager.EndCurrentRound();
-            _runManager.AdvanceToNextRound(); // publishes RoundStartedEvent{2}
+            _runManager.AdvanceToNextRound();
 
             Assert.AreEqual(2, _runManager.CurrentRound);
             Assert.AreEqual(RunManager.RunPhase.Combat, _runManager.CurrentPhase);
-            Assert.AreEqual(2, roundStartedCount, "RoundStartedEvent must fire on both start and advance.");
-            Assert.AreEqual(2, lastRoundNumber, "Gotcha #9: CurrentRound must be incremented before publish.");
-
-            EventBus.Instance.Unsubscribe(handler);
         }
 
         [Test]

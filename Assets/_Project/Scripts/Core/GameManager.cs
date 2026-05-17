@@ -64,7 +64,15 @@ namespace HellpitRampage.Core
                 return;
             }
             PendingResume = data;
-            TransitionTo(GameState.InRun);
+
+            // WS-015: a run save is always captured at shop-phase entry, so a resume loads
+            // the Shop scene directly. Mirror TransitionTo's state update + event, then route
+            // via SceneRouter (Combat loads later, when the player clicks Next Round).
+            GameState oldState = CurrentState;
+            CurrentState = GameState.InRun;
+            if (EventBus.Instance != null)
+                EventBus.Instance.Publish(new GameStateChangedEvent { OldState = oldState, NewState = GameState.InRun });
+            if (SceneRouter.Instance != null) SceneRouter.Instance.LoadShop();
         }
 
         public void TransitionTo(GameState newState)

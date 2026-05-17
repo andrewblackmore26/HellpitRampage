@@ -70,7 +70,7 @@ namespace HellpitRampage.Save
             var hero = DataRegistry.Instance.GetHero(data.HeroId);
 
             if (RunManager.Instance != null)
-                RunManager.Instance.RestoreFromSave(data.CurrentRound, data.Gold, hero);
+                RunManager.Instance.RestoreFromSave(data.CurrentRound, data.Gold, hero, data.PlayerCurrentHp, data.PlayerMaxHp);
 
             // Player Health — find by IsPlayer (no enemies alive in shop phase).
             Health playerHealth = FindPlayerHealth();

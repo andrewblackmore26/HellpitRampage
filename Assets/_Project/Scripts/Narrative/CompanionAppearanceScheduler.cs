@@ -9,7 +9,7 @@ namespace HellpitRampage.Narrative
     /// the placeholder appearance. Rounds 23-24 are deliberately silent — the scheduler
     /// still publishes <see cref="CompanionAppearanceCompleteEvent"/> so combat is not
     /// blocked. Scene-scoped; instantiated in code by
-    /// <see cref="HellpitRampage.Core.GameSceneBootstrap"/>. It also builds and owns its
+    /// <see cref="HellpitRampage.Core.CombatSceneBootstrap"/>. It also builds and owns its
     /// <see cref="CompanionPlaceholderUI"/> child so no Inspector wiring is required.
     /// </summary>
     public class CompanionAppearanceScheduler : MonoBehaviour
