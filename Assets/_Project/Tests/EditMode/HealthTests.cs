@@ -19,14 +19,17 @@ namespace HellpitRampage.Tests
         [SetUp]
         public void SetUp()
         {
-            // EventBus is required because Health.HandleDeath publishes EnemyDiedEvent / PlayerDiedEvent.
+            // EditMode AddComponent does not fire Awake/OnEnable — wake each component
+            // explicitly (see EditModeLifecycle). EventBus is required because
+            // Health.HandleDeath publishes EnemyDiedEvent / PlayerDiedEvent through it.
             _eventBusGO = new GameObject("EventBusTestHost");
-            _eventBusGO.AddComponent<EventBus>();
+            EditModeLifecycle.Wake(_eventBusGO.AddComponent<EventBus>());
 
             _healthGO = new GameObject("HealthTestHost");
             _health = _healthGO.AddComponent<Health>();
-            // OnEnable already fired (active GameObject + AddComponent). _startingHP defaults to 100.
-            // Tests that need a specific MaxHP call Initialize(...) explicitly.
+            EditModeLifecycle.Wake(_health);
+            // Health.OnEnable set HP from _startingHP (100). Tests that need a specific
+            // MaxHP call Initialize(...) explicitly.
         }
 
         [TearDown]

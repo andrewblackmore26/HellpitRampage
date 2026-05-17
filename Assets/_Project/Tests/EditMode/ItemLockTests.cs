@@ -19,11 +19,15 @@ namespace HellpitRampage.Tests
         [SetUp]
         public void SetUp()
         {
+            // EditMode AddComponent does not fire Awake/OnEnable — wake each component
+            // explicitly (see EditModeLifecycle). EventBus first so the service's
+            // LockChanged events have a live bus to publish through.
             _eventBusGO = new GameObject("EventBusTestHost");
-            _eventBusGO.AddComponent<EventBus>();
+            EditModeLifecycle.Wake(_eventBusGO.AddComponent<EventBus>());
 
             _serviceGO = new GameObject("InventoryServiceTestHost");
             _service = _serviceGO.AddComponent<InventoryService>();
+            EditModeLifecycle.Wake(_service);
         }
 
         [TearDown]

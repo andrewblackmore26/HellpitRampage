@@ -23,7 +23,9 @@ namespace HellpitRampage.Core
             Instance = this;
             // DontDestroyOnLoad only works on root GameObjects. The singleton sits under a
             // `Managers` parent in Boot.unity for hierarchy organization, so persist the root.
-            DontDestroyOnLoad(transform.root.gameObject);
+            // Guarded: DontDestroyOnLoad is play-mode-only and throws when this singleton
+            // is instantiated in an EditMode test.
+            if (Application.isPlaying) DontDestroyOnLoad(transform.root.gameObject);
         }
 
         private void OnDestroy()

@@ -19,11 +19,16 @@ namespace HellpitRampage.Tests
         [SetUp]
         public void SetUp()
         {
+            // EditMode AddComponent does not fire Awake/OnEnable — wake each component
+            // explicitly (see EditModeLifecycle). EventBus first so DragModeService.OnEnable
+            // subscribes to ShopPhaseStartedEvent / drag events through it.
             _busGO = new GameObject("EventBusHost");
             _bus = _busGO.AddComponent<EventBus>();
+            EditModeLifecycle.Wake(_bus);
 
             _serviceGO = new GameObject("DragModeServiceHost");
             _service = _serviceGO.AddComponent<DragModeService>();
+            EditModeLifecycle.Wake(_service);
         }
 
         [TearDown]

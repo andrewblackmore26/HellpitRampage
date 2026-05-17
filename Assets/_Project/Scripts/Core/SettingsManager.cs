@@ -38,7 +38,9 @@ namespace HellpitRampage.Core
             }
 
             Instance = this;
-            DontDestroyOnLoad(transform.root.gameObject);
+            // Guarded: DontDestroyOnLoad is play-mode-only and throws when this singleton
+            // is instantiated in an EditMode test.
+            if (Application.isPlaying) DontDestroyOnLoad(transform.root.gameObject);
             EnsureInitialized();
             ApplyAll();
             SceneManager.sceneLoaded += OnSceneLoaded;

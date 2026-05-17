@@ -18,12 +18,15 @@ namespace HellpitRampage.Tests
         [SetUp]
         public void SetUp()
         {
-            // EventBus must exist BEFORE RunManager so RunManager.OnEnable subscribes to PlayerDiedEvent.
+            // EditMode AddComponent does not fire Awake/OnEnable — wake each component
+            // explicitly (see EditModeLifecycle). EventBus first so RunManager.OnEnable can
+            // subscribe to it for PlayerDiedEvent.
             _eventBusGO = new GameObject("EventBusTestHost");
-            _eventBusGO.AddComponent<EventBus>();
+            EditModeLifecycle.Wake(_eventBusGO.AddComponent<EventBus>());
 
             _runManagerGO = new GameObject("RunManagerTestHost");
             _runManager = _runManagerGO.AddComponent<RunManager>();
+            EditModeLifecycle.Wake(_runManager);
         }
 
         [TearDown]

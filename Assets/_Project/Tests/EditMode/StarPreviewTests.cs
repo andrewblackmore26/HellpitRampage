@@ -75,7 +75,7 @@ namespace HellpitRampage.Tests
             var whetstoneData = MakeItem("Whetstone", Shape1x1(), new[] { ItemTag.Sharpening },
                 stars: new[] { Star(0, 0, EdgeDirection.Right) },
                 effects: new[] { Mod(ItemTag.Weapon, ConditionalEffectTarget.Neighbor) });
-            grid.PlaceItem(whetstoneData, new Vector2Int(0, 0));
+            var whetstone = grid.PlaceItem(whetstoneData, new Vector2Int(0, 0));
 
             // Weapon initially at (2, 0) — NOT adjacent.
             var weaponData = MakeItem("Knife", Shape1x1(), new[] { ItemTag.Weapon });
@@ -95,8 +95,8 @@ namespace HellpitRampage.Tests
                 Assert.AreEqual(1, preview.ActiveStars.Count,
                     "Preview should activate the whetstone's star when a Weapon enters its target cell.");
                 Assert.IsTrue(
-                    preview.ActiveStars.Contains((1, new Vector2Int(0, 0), EdgeDirection.Right)),
-                    "Active-star tuple should identify Whetstone (id=1) at star (0,0)/Right.");
+                    preview.ActiveStars.Contains((whetstone.InstanceID, new Vector2Int(0, 0), EdgeDirection.Right)),
+                    "Active-star tuple should identify the whetstone at star (0,0)/Right.");
             }
             finally
             {

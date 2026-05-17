@@ -26,7 +26,9 @@ namespace HellpitRampage.Core
             Instance = this;
             // DontDestroyOnLoad only works on root GameObjects. The singleton sits under a
             // `Managers` parent in Boot.unity for hierarchy organization, so persist the root.
-            DontDestroyOnLoad(transform.root.gameObject);
+            // Guarded: DontDestroyOnLoad is play-mode-only and throws when this singleton
+            // is instantiated in an EditMode test.
+            if (Application.isPlaying) DontDestroyOnLoad(transform.root.gameObject);
         }
 
         private void OnDestroy()
@@ -74,14 +76,14 @@ namespace HellpitRampage.Core
             if (marker == null || marker.SourcePrefab == null)
             {
                 Debug.LogError($"PoolManager.Release: instance '{instance.name}' has no PooledObject/SourcePrefab. Destroying directly.");
-                Destroy(instance);
+                DestroyInstance(instance);
                 return;
             }
 
             if (!_pools.TryGetValue(marker.SourcePrefab, out var pool))
             {
                 Debug.LogError($"PoolManager.Release: no pool found for source prefab '{marker.SourcePrefab.name}'. Destroying instance.");
-                Destroy(instance);
+                DestroyInstance(instance);
                 return;
             }
 
@@ -98,6 +100,15 @@ namespace HellpitRampage.Core
             marker.IsPooled = true;
 
             pool.Release(instance);
+        }
+
+        // Destroys an instance the pool is rejecting. UnityEngine.Object.Destroy logs an
+        // error when called outside play mode (EditMode tests); DestroyImmediate is the
+        // edit-mode-safe equivalent. At runtime this is always the plain Destroy path.
+        private static void DestroyInstance(GameObject instance)
+        {
+            if (Application.isPlaying) Destroy(instance);
+            else DestroyImmediate(instance);
         }
 
         public void Prewarm(GameObject prefab, int count)

@@ -31,7 +31,8 @@ namespace HellpitRampage.Core
 
             Instance = this;
             // L-001: persist the root, not the child. Singleton sits under `Managers`.
-            DontDestroyOnLoad(transform.root.gameObject);
+            // Guarded: DontDestroyOnLoad is play-mode-only and throws in EditMode tests.
+            if (Application.isPlaying) DontDestroyOnLoad(transform.root.gameObject);
         }
 
         private void OnEnable()
