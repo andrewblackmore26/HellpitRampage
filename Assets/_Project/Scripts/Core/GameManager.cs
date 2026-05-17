@@ -97,7 +97,7 @@ namespace HellpitRampage.Core
             {
                 case GameState.Boot:     return "Boot";
                 case GameState.MainMenu: return "MainMenu";
-                case GameState.InRun:    return "Game";
+                case GameState.InRun:    return "Combat";
                 default:
                     Debug.LogError($"GameManager: no scene mapping for state {state}.");
                     return "Boot";
