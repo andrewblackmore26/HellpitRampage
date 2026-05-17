@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using HellpitRampage.Core;
+using HellpitRampage.UI;
 using UnityEngine;
 
 namespace HellpitRampage.Inventory
@@ -15,12 +16,37 @@ namespace HellpitRampage.Inventory
             if (Instance != null && Instance != this) { Destroy(gameObject); return; }
             Instance = this;
             Grid = new InventoryGrid();
+            // WS-015: persistent across the Combat<->Shop scene transitions so inventory
+            // and ground-item state survive. Guarded — DontDestroyOnLoad is play-mode-only
+            // and throws when instantiated in an EditMode test.
+            if (Application.isPlaying) DontDestroyOnLoad(transform.root.gameObject);
         }
 
         private void OnDestroy()
         {
             if (Instance == this) Instance = null;
         }
+
+        // WS-015: ground-item state lives on this persistent service (not the scene-scoped
+        // GroundManager) so it survives the Combat<->Shop scene transitions. GroundManager
+        // owns the visuals; after every change it mirrors its full snapshot here via
+        // SyncGroundItems, and rebuilds its visuals from this list when the Shop scene loads.
+        private readonly List<GroundItemSnapshot> _groundItems = new();
+        public IReadOnlyList<GroundItemSnapshot> GroundItems => _groundItems;
+
+        /// <summary>
+        /// Replaces the persisted ground-item list wholesale with GroundManager's current
+        /// snapshot. Wholesale (rather than per-item add/remove) so an in-place lock toggle
+        /// on a ground item is captured without snapshot-identity matching.
+        /// </summary>
+        public void SyncGroundItems(IReadOnlyList<GroundItemSnapshot> snapshots)
+        {
+            _groundItems.Clear();
+            if (snapshots != null) _groundItems.AddRange(snapshots);
+        }
+
+        /// <summary>Clears persisted ground items — called on a fresh run.</summary>
+        public void ClearGroundItems() => _groundItems.Clear();
 
         // WS-013: full reset before a run-restore. Bypasses per-item event publishing because
         // the restore controller rebuilds the grid in one batch and the UI redraws from the

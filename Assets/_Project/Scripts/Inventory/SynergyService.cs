@@ -20,6 +20,10 @@ namespace HellpitRampage.Inventory
         {
             if (Instance != null && Instance != this) { Destroy(gameObject); return; }
             Instance = this;
+            // WS-015: persistent across the Combat<->Shop scene transitions so combat code
+            // can query the cached synergy resolution while the Shop scene is unloaded.
+            // Guarded — DontDestroyOnLoad is play-mode-only and throws in EditMode tests.
+            if (Application.isPlaying) DontDestroyOnLoad(transform.root.gameObject);
         }
 
         private void OnDestroy()
