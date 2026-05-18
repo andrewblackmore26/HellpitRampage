@@ -35,14 +35,15 @@ Hellpit Rampage/
 │   ├── _Project/                  All first-party game content
 │   │   ├── Audio/                 Music/ + SFX/ (no MainMixer.mixer yet — see §7/§12)
 │   │   ├── Prefabs/               Player, Enemies, Projectiles, Effects, UI
-│   │   ├── Scenes/                Boot, MainMenu, Game (the only three scenes)
+│   │   ├── Scenes/                Boot, MainMenu, Combat, Shop (a run alternates
+│   │   │                          Combat ↔ Shop per round — WS-015)
 │   │   ├── ScriptableObjects/     Hard-referenced data SOs: Items, Bags, Enemies,
 │   │   │                          Heroes, + DataManifest.asset. Biomes/Dialogue/
 │   │   │                          Recipes folders exist but are empty scaffolds.
 │   │   ├── Scripts/               All gameplay code (see subfolders below)
 │   │   ├── Settings/              URP config + Input/ (PlayerInput.inputactions)
 │   │   ├── Sprites/               Placeholder art
-│   │   └── Tests/EditMode/        30 EditMode test files (no PlayMode tests)
+│   │   └── Tests/EditMode/        35 EditMode test fixtures, 176 tests (no PlayMode)
 │   ├── Plugins/Demigiant/DOTween/ Tweening library — do not delete
 │   ├── Settings/                  URP pipeline assets
 │   └── TextMesh Pro/              TMP essentials — do not delete
@@ -198,38 +199,30 @@ Project conventions. Follow them by default; an exception must be intentional an
 
 ## §7 Current implementation status (point-in-time snapshot)
 
-**Last updated:** 2026-05-16
+**Last updated:** 2026-05-18
 
-**Working tree:** `HEAD` is commit `566e463` (WS-012.5). About 110 files of WS-012.6 /
-12.7 / WS-013 work — plus this document — are on disk but **not yet committed**. If this
-date is more than ~4 weeks stale, re-read `tasks/todo.md` and the latest audit instead of
-trusting this table.
+**Working tree:** WS-014.A/B/C and WS-015 (the shop-as-scene refactor, 7 commits) are all
+committed to `main`. If this date is more than ~4 weeks stale, re-read `tasks/todo.md` and
+the latest audit instead of trusting this table.
 
 | Spec | Status | Summary |
 |------|--------|---------|
-| WS-001 | ✅ | Project bootstrap — scenes (Boot/MainMenu/Game), input actions, project settings |
-| WS-002 / 002b | ✅ | Core singletons (GameManager, EventBus, SaveManager skeleton); `DontDestroyOnLoad` root fix |
-| WS-003 … 011.5 | ✅ | Combat loop, object pooling, weapons & projectiles, HP bar, spatial inventory grid, shop, tooltip, and the WS-011 → WS-011.5 pivot to item-owned conditional-effect synergies (one squash commit) |
-| WS-012 | ✅ | Item & bag locking, sell modal, gold auto-vacuum |
-| WS-012.1 | ✅ | Tooltip UX refinement; locking consolidated into the unified tooltip |
-| WS-012.2 | ✅ | Multi-cell item shapes + placeholder colors |
-| WS-012.3 | 📦 | Unified tooltip (hover + click-to-pin); old DetailTooltipController/GridClickTooltipHandler removed |
-| WS-012.4 | ⚠️ | Visual foundation (TMP, camera, URP audit) — TMP migration of the **scenes** is still a pending manual Editor step |
-| WS-012.5 | ✅ | Ground/spillover system, bag selling, drag-mode toggle (HEAD commit) |
-| WS-012.6 | ⚠️ | Settings menu, pause menu, accessibility, controller foundation — code complete, but no `MainMixer.mixer` asset exists and pause `_inputActions` is unwired |
-| WS-012.7 | 📦 | Audit cleanup — shop drag-ghost fix, camera size, lessons L-016/L-017 |
-| WS-012.X | ✅ | Verification audit → `tasks/ws_012_x_audit.md` |
-| WS-013 | 📦 | Save / resume system (run + meta + settings; string-Id indirection) — on disk, **never playtested** |
-| Full Game Audit | 🚧 | Whole-game audit started 2026-05-16; deliverable `tasks/full_audit_2026-05-16.md` not yet written |
-| WS-META-001 | 🚧 | This document |
+| WS-001 … WS-013 | ✅ | Bootstrap, combat loop, pooling, weapons, spatial inventory, shop, tooltip, item/bag locking, ground/spillover, settings/pause, save/resume — all committed (WS-012.6/12.7/13 landed bundled into WS-014.A) |
+| WS-014.A | ✅ | Audit + foundation fixes before first playable |
+| WS-014.B | ✅ | First playable — run-end screens, companion + biome placeholders, Continue Run |
+| WS-014.C | ✅ | Fixed 15 pre-existing EditMode failures; the suite is now a real gate (L-026) |
+| WS-015 | ✅ | Shop extracted to a dedicated `Shop.unity`; a run alternates `Combat.unity` ↔ `Shop.unity` |
 
-Legend: ✅ Implemented & committed · 📦 Implemented, on disk, uncommitted · ⚠️ Partial /
-blocked · 🚧 In progress
+Legend: ✅ Implemented & committed.
 
-**Test suite:** 30 EditMode test files under `Assets/_Project/Tests/EditMode/`. The
-EditMode suite is the regression net — keep it green.
+**Test suite:** 35 EditMode test fixtures under `Assets/_Project/Tests/EditMode/`, **176
+tests**, all green. The suite is the regression net — keep it green; it can be run
+headlessly (see §12).
 
-**Most recent audit:** `tasks/ws_012_x_audit.md` (2026-05-15).
+**Most recent audit:** `tasks/ws_015_pre_audit.md` (2026-05-18).
+
+**Known outstanding:** the scene-level TMP migration (WS-014.A "C-1") was never run — see
+§12; and no `MainMixer.mixer` asset exists.
 
 ---
 
@@ -237,7 +230,7 @@ EditMode suite is the regression net — keep it green.
 
 | Question | Where |
 |----------|-------|
-| What lessons / gotchas has the project hit? | `tasks/lessons.md` (L-001 … L-020) |
+| What lessons / gotchas has the project hit? | `tasks/lessons.md` (L-001 … L-028) |
 | What did each spec actually do? Plan deviations? | `tasks/todo.md` |
 | What did the last audit find? | `tasks/ws_012_x_audit.md` |
 | What's the working style? Hard/standing rules? | This doc — §3, §4, §5, §6 |
@@ -349,13 +342,21 @@ Each of these has caused a real problem on this project.
 - **Settings persist separately** as `settings.json`, distinct from the run save
   (`run_save.json`) and the meta save (`save.json`). No `PlayerPrefs` anywhere.
 - **UI is mostly code-built**, constructed in `Awake`, not authored as large prefab YAML.
-- **Unity cannot be driven from the dev shell** — no batch-mode Unity on PATH, and the
-  editor holds a project lock. AI coders cannot run the EditMode tests or playtest; those
-  steps are always handed to the designer. Static cross-reference review is the substitute.
-- **Two manual Editor blockers are outstanding** (per `ws_012_x_audit.md`): no
-  `MainMixer.mixer` audio asset exists, and the pause menu's `_inputActions` reference is
-  unwired in `Game.unity`. Until both are fixed, volume sliders and the pause menu do not
-  function in play.
+- **Unity CAN be driven headlessly from the dev shell.** Unity 6000.4.6f1 lives at
+  `C:\Program Files\Unity\Hub\Editor\6000.4.6f1\Editor\Unity.exe` (not on PATH, but at the
+  standard Hub path). `Unity.exe -batchmode -nographics -projectPath . -runTests
+  -testPlatform EditMode -testResults <xml> -logFile <log>` runs the EditMode suite;
+  `-executeMethod <Namespace.Class.Method>` runs an editor script. The Unity Editor must be
+  **closed** during a batch run (Unity single-instances the project). An AI coder *can*
+  run the EditMode tests and headless compile checks; a live human *playtest* is still a
+  designer task. (WS-015 corrected this — the prior claim "cannot be driven" was wrong.)
+- **Outstanding manual Editor work:** (1) no `MainMixer.mixer` audio asset exists, so
+  `SettingsManager._mainMixer` is null and the volume sliders do not function; (2) the
+  scene-level TMP migration (WS-014.A "C-1") was never run — `Combat.unity` and
+  `Shop.unity` wire legacy `Text` components into `TextMeshProUGUI` fields, so ~15 text
+  labels (item names, prices, gold, round/shop headers) resolve null. Run the
+  `MigrateTextToTMPro` editor tool on both scenes. (The pause-menu `_inputActions` blocker
+  is resolved — WS-014.B code-resolves the Pause action per L-021.)
 - **The lesson numbering can drift** between `tasks/todo.md` and `tasks/lessons.md`. When
   citing a lesson, trust the `L-NNN` heading in `lessons.md` itself.
 

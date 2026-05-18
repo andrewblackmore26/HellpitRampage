@@ -1598,6 +1598,96 @@ A defer makes it correct by construction.
 
 ---
 
+## L-026 — EditMode tests do not run MonoBehaviour lifecycle; `AddComponent` ≠ `Awake`
+
+**Surfaced during:** WS-014.C. A headless `-runTests` pass (the first time the EditMode
+suite was actually executed — the team verified by playtest) found 15 failures on a
+green-*looking* baseline. Root cause: EditMode tests run in *edit mode*, and a
+MonoBehaviour `AddComponent`'d there does NOT get `Awake`/`OnEnable` called — those fire
+only in play mode. Singletons that wire their static `Instance` in `Awake` stayed unwired;
+tests using `EventBus.Instance` etc. threw `NullReferenceException`. Forcing `Awake` to run
+then surfaced a second fault: `DontDestroyOnLoad` *throws* `InvalidOperationException` when
+called in an EditMode test (it is play-mode-only).
+
+**The mistake:** writing an EditMode test that `new GameObject().AddComponent<T>()` and
+assumes the component is "alive" — `Instance` wired, `OnEnable` subscriptions made. It is
+an inert object. Symmetrically, `DestroyImmediate` does NOT call `OnDisable`/`OnDestroy`
+for a component whose `Awake` Unity never started.
+
+**The fix:**
+1. A test helper (`Tests/EditMode/EditModeLifecycle.cs` → `Wake`) reflection-invokes
+   `Awake` then `OnEnable` on a freshly-added component. Call it in every `[SetUp]`.
+2. Guard every singleton's `DontDestroyOnLoad` with `if (Application.isPlaying)` — a no-op
+   at runtime, and it keeps the singleton EditMode-instantiable.
+
+```csharp
+Instance = this;
+if (Application.isPlaying) DontDestroyOnLoad(transform.root.gameObject);
+```
+
+**When this applies:**
+- Any EditMode test exercising MonoBehaviour runtime behaviour (singletons, event
+  subscriptions, anything set up in `Awake`/`OnEnable`).
+- Behaviour that only happens in `OnDestroy` (e.g. clearing a static `Instance`) is not
+  EditMode-testable — Unity never started the lifecycle, so nothing ends it. Verify by
+  inspection, don't write the test.
+
+**Resist:** "the suite is green, it's fine." It was never *run*. An authored-but-unexecuted
+test proves nothing.
+
+---
+
+## L-027 — A scene-split refactor must re-home events whose subscribers live in another scene
+
+**Surfaced during:** WS-015 (shop moved from an in-scene overlay to its own scene).
+`RunManager.AdvanceToNextRound()` incremented the round and published `RoundStartedEvent`.
+Pre-split every subscriber was in the same scene. Post-split the combat subscribers
+(`CombatRoundController`, `CompanionAppearanceScheduler`) live in `Combat.unity`, which is
+not loaded when `AdvanceToNextRound` runs (it runs in the Shop scene). The event fired into
+the void; combat never started.
+
+**The mistake:** treating a published event as reaching its subscribers regardless of
+scene. An event only reaches subscribers that *exist at publish time*.
+
+**The fix:** a persistent state holder (here `RunManager`) owns the canonical state
+(round, phase). The trigger sets state + loads the scene; each scene's bootstrap publishes
+the phase event in its `Start()`, AFTER its scene is live:
+- `AdvanceToNextRound` → set phase, `SceneRouter.LoadCombat()`; `CombatSceneBootstrap.Start`
+  publishes `RoundStartedEvent`.
+- `EndCurrentRound` → publish `RoundEndedEvent` (combat cleanup, still in Combat), then
+  `SceneRouter.LoadShop()`; `ShopSceneBootstrap.Start` publishes `ShopPhaseStartedEvent`.
+
+**When this applies:** any refactor that splits one scene into several — audit every
+`EventBus.Publish` against "which scene is each subscriber in, and is it loaded yet?"
+
+**Resist:** "the event still publishes, the handler just isn't there yet." A handler that
+isn't there does not run later. Publish from inside the destination scene.
+
+---
+
+## L-028 — Move objects between scenes with an editor script, never hand-authored YAML
+
+**Surfaced during:** WS-015 part 5 — extracting a ~35-object shop-UI subtree from one
+scene into a new one. Hand-editing scene YAML to move objects is extremely error-prone:
+fileIDs are scene-local, references break silently, and nothing is verified until the
+scene is opened.
+
+**The fix:** a one-shot editor script run headless via `-executeMethod`.
+`SceneManager.MoveGameObjectToScene` + `EditorSceneManager` move objects with every
+reference preserved *by construction* — Unity fixes up references for objects that move
+together. `MoveGameObjectToScene` needs a root, so a nested object is detached to a root,
+moved, then re-parented. Validate with a second editor method that opens each scene and
+counts missing scripts (null entries in `GetComponents<Component>()`), writing the report
+to a *file* (`Debug.Log` is unreliable under `-executeMethod`).
+
+**When this applies:** any scene-structure refactor — extracting a subtree, splitting a
+scene, relocating singletons.
+
+**Resist:** "the YAML is just text, I can move the blocks." Scene YAML has content-derived
+and cross-referenced IDs; Unity's own APIs are the only reference-safe mover.
+
+---
+
 ## Meta — when capturing a new lesson
 
 1. Number it (`L-NNN`) so future references stay stable.

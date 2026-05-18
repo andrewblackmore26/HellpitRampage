@@ -622,3 +622,97 @@ Per CLAUDE.md a spec is not done until the designer's manual playtest passes —
 gate is outstanding. Static cross-reference review done: every new API call checked
 against the real signatures; no scene wiring left dangling; existing SerializeField
 names preserved. Content audit: `tasks/content_audit_post_ws014b.md`.
+
+---
+
+# WS-014.C — Fix EditMode test suite (pre-WS-015 cleanup)
+
+A headless `-runTests` pass — the first time the EditMode suite was actually run; the team
+verifies by playtest — found **15 failures** on the pristine WS-014.B baseline. Root cause
+and fixes captured in **L-026**:
+
+- New `Tests/EditMode/EditModeLifecycle.cs` — reflection-invokes `Awake`/`OnEnable` on
+  `AddComponent`'d components, which EditMode does not.
+- `DontDestroyOnLoad` guarded with `if (Application.isPlaying)` in all 7 Boot singletons
+  (EventBus, RunManager, GameManager, SaveManager, PoolManager, SettingsManager,
+  DataRegistry) — it throws when called in an EditMode test.
+- `PoolManager.DestroyInstance` uses `DestroyImmediate` outside play mode.
+- `StarPreviewTests` reads the whetstone's real `InstanceID` (it hard-coded `1`, but
+  `PlaceBag` consumes id 1 before the item — the whetstone is id 2).
+- 5 fixtures' `[SetUp]` updated to wake their components.
+
+Result: **164/164 green.** Commit `68e4dbc`.
+
+---
+
+# WS-015 — Shop as Dedicated Scene
+
+Spec: `WS-015_Shop_As_Scene.md` (provided inline 2026-05-18). Moves the shop from an
+in-scene overlay into a dedicated `Shop.unity`; a run now alternates `Combat.unity` ↔
+`Shop.unity` per round. 7 commits, each compile-clean (zero errors/warnings) and
+EditMode-green.
+
+**Execution:** driven headlessly — `-batchmode -runTests` for verification, `-executeMethod`
+for the scene surgery. CLAUDE.md §12's old "Unity cannot be driven from the shell" claim
+was wrong and is corrected.
+
+## Commits
+
+- part 1 `7ed013a` — `Game.unity` → `Combat.unity`; `tasks/ws_015_pre_audit.md`.
+- part 2 `e859aa8` — new `SceneRouter`; `InventoryService`/`SynergyService` made persistent
+  (`DontDestroyOnLoad`); `InventoryService.GroundItems` snapshot list (`SyncGroundItems`).
+- part 3 `6821f43` — HP carryover (`RunManager.CurrentHp`/`MaxHp`); round transitions become
+  scene loads; `GameSceneBootstrap` → `CombatSceneBootstrap`; new `ShopSceneBootstrap`;
+  `HeroStartingLoadout` made persistent + `RunStartedEvent`-driven.
+- part 4 `8f89369` — shop-side components init on scene load; save/restore routes HP via
+  `RunManager` and ground items via `InventoryService`.
+- part 5 `1ba8aad` — scene surgery via `Editor/WS015SceneRefactor.cs`: created `Shop.unity`,
+  moved the shop-UI subtree + services, relocated the persistent singletons into Boot.
+- part 6 `6ac7b58` — +12 EditMode tests (SceneRouter, GroundItems, HP carryover); suite 176.
+- part 7 — this summary + CLAUDE.md §2/§7/§12 + lessons L-026…L-028.
+
+## Plan deviations
+
+- **D1** `SynergyService` also promoted to a persistent Boot singleton (spec §4.6 named
+  only `InventoryService`) — combat queries its cached resolution while Shop is unloaded.
+- **D2** `HeroStartingLoadout` moved to Boot + made `RunStartedEvent`-driven (was a
+  `Start()`-driven scene component — left in the Combat scene it would re-seed every round).
+- **D3** `RunManager` owns the canonical HP; `SaveManager`/`RunRestoreController` no longer
+  read a player `Health` component (the Shop scene, where saves fire, has no player).
+- **D4** Phase events (`RoundStartedEvent`, `ShopPhaseStartedEvent`) re-homed to the scene
+  bootstraps — published after the destination scene loads (L-027).
+- **D5** `ShopController`/`ShopOverlayController` init from `ShopPhaseStartedEvent` on scene
+  load, not from `RoundEndedEvent`; `ShopOverlayController`'s panel-toggle role is gone.
+- **D6** Scene surgery done by a batch-mode editor script (L-028), not hand-authored YAML.
+- **D7** Per-scene `EventSystem`/`Canvas`/`PauseMenu`/`SettingsMenu` for Shop (spec §4.8/§4.9
+  offered persistent singletons as optional — kept per-scene, matching the project).
+- **D8** Ground persistence uses a wholesale `InventoryService.SyncGroundItems` rather than
+  per-item add/remove — avoids struct value-equality removal ambiguity and captures
+  in-place lock toggles.
+
+## Verification
+
+- EditMode suite **176/176**; headless compile **zero errors / zero warnings** after every
+  commit.
+- Scene-validation pass (`WS015SceneRefactor.Validate`): **missingScripts=0** in all three
+  scenes — the surgery broke no script references.
+
+## Outstanding (designer)
+
+- **§4.13 playtest** — the 30-round Combat↔Shop walkthrough, resume-into-Shop, pause in
+  both scenes, ground items surviving transitions, death/Try-Again. An AI coder cannot
+  run a live playtest.
+- **C-1 (pre-existing, NOT a WS-015 regression):** the scene-level TMP migration was never
+  run. `Combat.unity` + `Shop.unity` wire legacy `Text` into `TextMeshProUGUI` fields, so
+  ~15 labels resolve null. Confirmed pre-existing — combat-only labels the surgery never
+  touched are equally null. Fix: run the `MigrateTextToTMPro` editor tool on both scenes.
+  WS-015's §0.1 pre-flight assumed C-1 was done; it was not.
+- **`MainMixer.mixer`** still does not exist (`SettingsManager._mainMixer` null).
+
+## Review
+
+WS-015 is **code-complete, committed, and verified to the limit of headless tooling**
+(compile clean, 176/176 EditMode, scene-validation clean). The structural goal — Combat and
+Shop as distinct scenes with explicit cross-scene state — is met. The designer's §4.13
+30-round playtest is the remaining acceptance gate; the C-1 label issue above will be
+visible during it and is a separate, pre-existing fix.
