@@ -212,6 +212,7 @@ the latest audit instead of trusting this table.
 | WS-014.B | ✅ | First playable — run-end screens, companion + biome placeholders, Continue Run |
 | WS-014.C | ✅ | Fixed 15 pre-existing EditMode failures; the suite is now a real gate (L-026) |
 | WS-015 | ✅ | Shop extracted to a dedicated `Shop.unity`; a run alternates `Combat.unity` ↔ `Shop.unity` |
+| WS-014.D | ✅ | Scene-wide legacy-Text → TMP migration + label re-wiring — completes WS-014.A "C-1" |
 
 Legend: ✅ Implemented & committed.
 
@@ -221,8 +222,8 @@ headlessly (see §12).
 
 **Most recent audit:** `tasks/ws_015_pre_audit.md` (2026-05-18).
 
-**Known outstanding:** the scene-level TMP migration (WS-014.A "C-1") was never run — see
-§12; and no `MainMixer.mixer` asset exists.
+**Known outstanding:** no `MainMixer.mixer` audio asset exists (`SettingsManager._mainMixer`
+is null) — see §12.
 
 ---
 
@@ -350,13 +351,11 @@ Each of these has caused a real problem on this project.
   **closed** during a batch run (Unity single-instances the project). An AI coder *can*
   run the EditMode tests and headless compile checks; a live human *playtest* is still a
   designer task. (WS-015 corrected this — the prior claim "cannot be driven" was wrong.)
-- **Outstanding manual Editor work:** (1) no `MainMixer.mixer` audio asset exists, so
-  `SettingsManager._mainMixer` is null and the volume sliders do not function; (2) the
-  scene-level TMP migration (WS-014.A "C-1") was never run — `Combat.unity` and
-  `Shop.unity` wire legacy `Text` components into `TextMeshProUGUI` fields, so ~15 text
-  labels (item names, prices, gold, round/shop headers) resolve null. Run the
-  `MigrateTextToTMPro` editor tool on both scenes. (The pause-menu `_inputActions` blocker
-  is resolved — WS-014.B code-resolves the Pause action per L-021.)
+- **Outstanding manual Editor work:** no `MainMixer.mixer` audio asset exists, so
+  `SettingsManager._mainMixer` is null and the volume sliders do not function. (Two
+  earlier blockers are resolved: the pause-menu `_inputActions` in WS-014.B per L-021;
+  the scene-level TMP migration / WS-014.A "C-1" in WS-014.D — every scene is now TMP
+  with the controller label references wired.)
 - **The lesson numbering can drift** between `tasks/todo.md` and `tasks/lessons.md`. When
   citing a lesson, trust the `L-NNN` heading in `lessons.md` itself.
 

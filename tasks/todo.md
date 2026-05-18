@@ -714,5 +714,32 @@ was wrong and is corrected.
 WS-015 is **code-complete, committed, and verified to the limit of headless tooling**
 (compile clean, 176/176 EditMode, scene-validation clean). The structural goal — Combat and
 Shop as distinct scenes with explicit cross-scene state — is met. The designer's §4.13
-30-round playtest is the remaining acceptance gate; the C-1 label issue above will be
-visible during it and is a separate, pre-existing fix.
+30-round playtest is the remaining acceptance gate.
+
+---
+
+# WS-014.D — Scene TMP migration + label re-wiring (C-1 fix)
+
+Resolves the WS-014.A "C-1" issue flagged in the WS-015 review. Commit `59e3fdb`.
+
+The scene labels were still legacy `UnityEngine.UI.Text`, while the controller scripts
+had moved to `TextMeshProUGUI` fields (WS-012.4) — a type mismatch that resolved every
+label reference to null. Two steps:
+
+- `MigrateTextToTMPro` (the existing WS-012.4 tool) converts every legacy `Text` to
+  `TextMeshProUGUI` in `Combat.unity`, `Shop.unity`, `MainMenu.unity` — zero legacy Text
+  remain.
+- New `Editor/WS014DRewireLabels.cs` re-wires the 17 `TextMeshProUGUI` label
+  SerializeFields the migration could not recover (the migration only re-points refs that
+  still pointed *at* a Text; these were already null, so it could not find them). Fields:
+  `_headerLabel`, `_label`, `_nameLabel` ×5, `_priceLabel` ×5, `_rerollLabel` across
+  ShopOverlayController, ShopController, ShopSlot, GoldDisplayController, ModeToggleButton,
+  SellModal, RunEndOverlayController, RoundTimerUI.
+
+Both editor scripts run headlessly via `-executeMethod`. Verified directly against the
+scene YAML: 0 legacy Text; all 17 label fields point at confirmed `TextMeshProUGUI`
+components. EditMode suite 176/176; headless compile clean.
+
+Note: `WS015SceneRefactor.Validate()` writes its report to `Temp/`, which Unity churns
+between batch runs — its file output proved unreliable; YAML inspection is the reliable
+check.
