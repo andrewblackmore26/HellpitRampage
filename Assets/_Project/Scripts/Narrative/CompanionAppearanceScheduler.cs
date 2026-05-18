@@ -21,7 +21,7 @@ namespace HellpitRampage.Narrative
             // Build the placeholder UI under the scene Canvas. If there is no Canvas the
             // UI stays null and HandleRoundStarted falls back to publishing the complete
             // event immediately — combat still proceeds.
-            var canvas = Object.FindFirstObjectByType<Canvas>();
+            var canvas = Object.FindAnyObjectByType<Canvas>();
             if (canvas == null) return;
 
             var go = new GameObject("CompanionPlaceholderUI", typeof(RectTransform));

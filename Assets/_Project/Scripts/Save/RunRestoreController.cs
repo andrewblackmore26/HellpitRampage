@@ -1,5 +1,5 @@
 using System.Collections;
-using HellpitRampage.Combat;
+using System.Collections.Generic;
 using HellpitRampage.Core;
 using HellpitRampage.Inventory;
 using HellpitRampage.UI;
@@ -8,9 +8,10 @@ using UnityEngine;
 namespace HellpitRampage.Save
 {
     /// <summary>
-    /// WS-013: lives in the Game scene. If GameManager.PendingResume is set when the scene loads,
-    /// rebuild run state from the save data instead of starting a fresh run. Defers one frame so
-    /// every Awake() (singletons, scene objects) has completed before we read or mutate.
+    /// WS-015: lives in the Shop scene. A resume always lands here — a run save is only
+    /// captured at shop-phase entry. If <see cref="GameManager.PendingResume"/> is set when
+    /// the scene loads, rebuild run state from the save (ShopSceneBootstrap defers its own
+    /// startup to us). Defers one frame so every Awake/OnEnable has completed first.
     /// </summary>
     public class RunRestoreController : MonoBehaviour
     {
@@ -29,7 +30,6 @@ namespace HellpitRampage.Save
             GameManager.Instance.PendingResume = null;
 
             if (SaveManager.Instance != null) SaveManager.Instance.BeginRestore();
-
             try
             {
                 ApplySave(data);
@@ -41,21 +41,11 @@ namespace HellpitRampage.Save
 
             EventBus.Instance?.Publish(new RunResumedEvent());
 
-            // WS-014.A (C-2 fix): a resumed run lands in the shop phase, but the shop UI opens
-            // off RoundEndedEvent — ShopOverlayController activates its panel and ShopController
-            // populates the 5 slots on RoundEndedEvent, NOT on ShopPhaseStartedEvent. Without
-            // this publish the shop never appears and the resumed run is soft-locked.
-            // Mirror RunManager.EndCurrentRound's order: RoundEndedEvent first (shop UI +
-            // CombatRoundController shop-state), then ShopPhaseStartedEvent for the shop-only
-            // consumers below. Side effects on resume are verified harmless: no round-end gold
-            // is awarded (only RunManager.EndCurrentRound awards it, and it is not invoked), and
-            // GoldFieldSweeper's sweep is a no-op because no gold pickups exist on resume.
-            EventBus.Instance?.Publish(new RoundEndedEvent { RoundNumber = data.CurrentRound });
-
-            // Drive shop-only systems: GroundManager activates GroundArea, DragModeService resets
-            // to Items mode. Our own auto-save handler has its restore flag cleared, so a save
-            // will fire — that's intentional: it re-writes the same content we just loaded and
-            // confirms the file is well-formed.
+            // WS-015: ShopSceneBootstrap deferred its ShopPhaseStartedEvent to us (PendingResume
+            // was set). Publish it now that state is rebuilt — it drives the GroundArea rebuild,
+            // the drag-mode reset, the shop slot population, and the auto-save. The auto-save
+            // handler's restore flag is now cleared, so a confirming same-content save fires:
+            // intentional — it re-writes exactly what we loaded and proves the file is sound.
             EventBus.Instance?.Publish(new ShopPhaseStartedEvent { RoundNumber = data.CurrentRound });
         }
 
@@ -69,13 +59,27 @@ namespace HellpitRampage.Save
 
             var hero = DataRegistry.Instance.GetHero(data.HeroId);
 
+            // WS-015: RunManager owns the canonical HP — RestoreFromSave applies round, gold,
+            // hero AND HP. There is no player Health component in the Shop scene to restore.
             if (RunManager.Instance != null)
-                RunManager.Instance.RestoreFromSave(data.CurrentRound, data.Gold, hero, data.PlayerCurrentHp, data.PlayerMaxHp);
+                RunManager.Instance.RestoreFromSave(data.CurrentRound, data.Gold, hero,
+                                                    data.PlayerCurrentHp, data.PlayerMaxHp);
 
-            // Player Health — find by IsPlayer (no enemies alive in shop phase).
-            Health playerHealth = FindPlayerHealth();
-            if (playerHealth != null)
-                playerHealth.RestoreFromSave(data.PlayerCurrentHp, data.PlayerMaxHp);
+            // Ground items are accumulated here (saved ground items + any item that no longer
+            // fits its grid origin) and handed to InventoryService in one batch. GroundManager
+            // rebuilds its visuals from this list when ShopPhaseStartedEvent fires (above).
+            var groundSnapshot = new List<GroundItemSnapshot>();
+            foreach (var g in data.GroundItems)
+            {
+                var groundData = DataRegistry.Instance.GetItem(g.ItemId);
+                if (groundData == null) continue; // GetItem already logged a warning
+                groundSnapshot.Add(new GroundItemSnapshot
+                {
+                    ItemId = groundData,
+                    Rotation = (Rotation)g.Rotation,
+                    IsLocked = g.IsLocked,
+                });
+            }
 
             var inv = InventoryService.Instance;
             if (inv != null)
@@ -106,46 +110,20 @@ namespace HellpitRampage.Save
                     }
                     else
                     {
-                        // Shape conflict (content changed since save) → spillover to the ground area.
-                        if (GroundManager.Current != null)
+                        // Shape conflict (content changed since save) → spill to the ground.
+                        groundSnapshot.Add(new GroundItemSnapshot
                         {
-                            GroundManager.Current.AddItem(itemData, rotation, itemEntry.IsLocked, Vector2.zero, Vector2.zero);
-                            Debug.LogWarning($"[RunRestoreController] Item '{itemEntry.ItemId}' didn't fit at {origin}; spilled to ground.");
-                        }
-                        else
-                        {
-                            Debug.LogWarning($"[RunRestoreController] Item '{itemEntry.ItemId}' didn't fit at {origin}; no GroundManager available, item lost.");
-                        }
+                            ItemId = itemData,
+                            Rotation = rotation,
+                            IsLocked = itemEntry.IsLocked,
+                        });
+                        Debug.LogWarning($"[RunRestoreController] Item '{itemEntry.ItemId}' didn't fit at {origin}; spilled to ground.");
                     }
                 }
             }
 
-            // Ground items — convert save entries back to snapshot type and hand off.
-            if (GroundManager.Current != null)
-            {
-                var snapshot = new System.Collections.Generic.List<GroundItemSnapshot>();
-                foreach (var g in data.GroundItems)
-                {
-                    var itemData = DataRegistry.Instance.GetItem(g.ItemId);
-                    if (itemData == null) continue;
-                    snapshot.Add(new GroundItemSnapshot
-                    {
-                        ItemId = itemData,
-                        Rotation = (Rotation)g.Rotation,
-                        IsLocked = g.IsLocked,
-                    });
-                }
-                GroundManager.Current.RestoreGroundState(snapshot);
-            }
-        }
-
-        private static Health FindPlayerHealth()
-        {
-            // L-004: parameterless overload.
-            var all = Object.FindObjectsByType<Health>();
-            foreach (var h in all)
-                if (h != null && h.IsPlayer) return h;
-            return null;
+            // One batch hand-off. GroundManager mirrors this back when it rebuilds its visuals.
+            if (inv != null) inv.SyncGroundItems(groundSnapshot);
         }
     }
 }

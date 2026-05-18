@@ -5,56 +5,35 @@ using UnityEngine.UI;
 
 namespace HellpitRampage.UI
 {
+    /// <summary>
+    /// WS-015: with the shop now a dedicated scene, this controller no longer shows or
+    /// hides an overlay panel — it just owns the shop header label and the Next Round
+    /// button. (Name kept for continuity; "overlay" no longer applies literally.)
+    /// </summary>
     public class ShopOverlayController : MonoBehaviour
     {
-        [SerializeField] private GameObject _panel;
         [SerializeField] private TextMeshProUGUI _headerLabel;
         [SerializeField] private Button _startNextRoundButton;
 
         private void OnEnable()
         {
             if (EventBus.Instance != null)
-            {
-                EventBus.Instance.Subscribe<RoundEndedEvent>(HandleRoundEnded);
-                EventBus.Instance.Subscribe<RoundStartedEvent>(HandleRoundStarted);
-                EventBus.Instance.Subscribe<RunEndedEvent>(HandleRunEnded);
-            }
+                EventBus.Instance.Subscribe<ShopPhaseStartedEvent>(HandleShopPhaseStarted);
             if (_startNextRoundButton != null)
                 _startNextRoundButton.onClick.AddListener(HandleStartNextClicked);
-
-            if (_panel != null) _panel.SetActive(false);
         }
 
         private void OnDisable()
         {
             if (EventBus.Instance != null)
-            {
-                EventBus.Instance.Unsubscribe<RoundEndedEvent>(HandleRoundEnded);
-                EventBus.Instance.Unsubscribe<RoundStartedEvent>(HandleRoundStarted);
-                EventBus.Instance.Unsubscribe<RunEndedEvent>(HandleRunEnded);
-            }
+                EventBus.Instance.Unsubscribe<ShopPhaseStartedEvent>(HandleShopPhaseStarted);
             if (_startNextRoundButton != null)
                 _startNextRoundButton.onClick.RemoveListener(HandleStartNextClicked);
         }
 
-        private void HandleRoundEnded(RoundEndedEvent evt)
+        private void HandleShopPhaseStarted(ShopPhaseStartedEvent evt)
         {
-            // Suppress shop on the final round — the run-end overlay takes over instead.
-            if (RunManager.Instance != null && RunManager.Instance.CurrentRound >= RunManager.Instance.TotalRounds)
-                return;
-
-            if (_panel != null) _panel.SetActive(true);
             if (_headerLabel != null) _headerLabel.text = $"Round {evt.RoundNumber} Complete";
-        }
-
-        private void HandleRoundStarted(RoundStartedEvent _)
-        {
-            if (_panel != null) _panel.SetActive(false);
-        }
-
-        private void HandleRunEnded(RunEndedEvent _)
-        {
-            if (_panel != null) _panel.SetActive(false);
         }
 
         private void HandleStartNextClicked()

@@ -24,8 +24,9 @@ namespace HellpitRampage.UI
 
             if (EventBus.Instance != null)
             {
-                EventBus.Instance.Subscribe<RoundEndedEvent>(HandleRoundEnded);
-                EventBus.Instance.Subscribe<RoundStartedEvent>(HandleRoundStarted);
+                // WS-015: the shop is its own scene now — populate slots when the shop opens
+                // (ShopPhaseStartedEvent), not on RoundEndedEvent (a Combat-scene event).
+                EventBus.Instance.Subscribe<ShopPhaseStartedEvent>(HandleShopPhaseStarted);
                 EventBus.Instance.Subscribe<GoldChangedEvent>(HandleGoldChanged);
             }
             if (_rerollButton != null) _rerollButton.onClick.AddListener(HandleRerollClicked);
@@ -36,8 +37,7 @@ namespace HellpitRampage.UI
         {
             if (EventBus.Instance != null)
             {
-                EventBus.Instance.Unsubscribe<RoundEndedEvent>(HandleRoundEnded);
-                EventBus.Instance.Unsubscribe<RoundStartedEvent>(HandleRoundStarted);
+                EventBus.Instance.Unsubscribe<ShopPhaseStartedEvent>(HandleShopPhaseStarted);
                 EventBus.Instance.Unsubscribe<GoldChangedEvent>(HandleGoldChanged);
             }
             if (_rerollButton != null) _rerollButton.onClick.RemoveListener(HandleRerollClicked);
@@ -53,17 +53,14 @@ namespace HellpitRampage.UI
             return offer;
         }
 
-        private void HandleRoundEnded(RoundEndedEvent _)
+        private void HandleShopPhaseStarted(ShopPhaseStartedEvent _)
         {
+            // WS-015: each Shop scene load is a fresh shop visit — re-roll the slot offers
+            // (offers are intentionally not persisted) and reset the reroll counter.
             _rerollsThisShop = 0;
             PopulateAllSlots();
             UpdateRerollLabel();
             UpdateAllAffordability();
-        }
-
-        private void HandleRoundStarted(RoundStartedEvent _)
-        {
-            foreach (var slot in _slots) if (slot != null) slot.MarkSold();
         }
 
         private void HandleGoldChanged(GoldChangedEvent _) => UpdateAllAffordability();

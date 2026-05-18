@@ -80,6 +80,8 @@ namespace HellpitRampage.UI
             var gi = FindByInstance(e.Item);
             if (gi == null || gi.Visual == null) return;
             RefreshLockOverlay(gi);
+            // WS-015: a lock toggle changes the persisted snapshot — mirror it.
+            MirrorToInventoryService();
         }
 
         private void HandleRunStarted(RunStartedEvent _) => ClearAll();
@@ -87,6 +89,10 @@ namespace HellpitRampage.UI
         private void HandleShopStarted(ShopPhaseStartedEvent _)
         {
             if (_groundAreaRT != null) _groundAreaRT.gameObject.SetActive(true);
+            // WS-015: the previous Shop scene's GroundManager was destroyed, but the ground
+            // state persisted on InventoryService — rebuild this scene's visuals from it.
+            if (InventoryService.Instance != null)
+                RestoreGroundState(InventoryService.Instance.GroundItems);
         }
 
         private void HandleRoundStarted(RoundStartedEvent _)
@@ -180,6 +186,7 @@ namespace HellpitRampage.UI
             ApplyVisualMode(go, itemsMode);
 
             _items.Add(groundItem);
+            MirrorToInventoryService();
 
             if (EventBus.Instance != null)
                 EventBus.Instance.Publish(new GroundItemAddedEvent { Item = groundItem.Instance });
@@ -192,6 +199,7 @@ namespace HellpitRampage.UI
             if (gi == null) return false;
             if (!_items.Remove(gi)) return false;
             if (gi.Visual != null) Destroy(gi.Visual);
+            MirrorToInventoryService();
             if (EventBus.Instance != null)
                 EventBus.Instance.Publish(new GroundItemRemovedEvent { Item = gi.Instance });
             return true;
@@ -260,6 +268,7 @@ namespace HellpitRampage.UI
             foreach (var gi in _items)
                 if (gi.Visual != null) Destroy(gi.Visual);
             _items.Clear();
+            MirrorToInventoryService();
         }
 
         // -------- Snapshot for future save support (WS-013) --------
@@ -272,14 +281,26 @@ namespace HellpitRampage.UI
             return snap;
         }
 
-        public void RestoreGroundState(List<GroundItemSnapshot> snapshot)
+        // WS-015: mirror the live ground state onto the persistent InventoryService list so
+        // it survives the Combat<->Shop scene swap. Wholesale — see InventoryService.SyncGroundItems.
+        private void MirrorToInventoryService()
         {
+            if (InventoryService.Instance != null)
+                InventoryService.Instance.SyncGroundItems(SnapshotGroundState());
+        }
+
+        public void RestoreGroundState(IReadOnlyList<GroundItemSnapshot> snapshot)
+        {
+            // Copy first: ClearAll mirrors an empty list onto InventoryService, so a caller
+            // passing InventoryService.GroundItems directly would have it cleared mid-loop.
+            var safe = snapshot != null ? new List<GroundItemSnapshot>(snapshot) : null;
+
             ClearAll();
-            if (snapshot == null || _groundAreaRT == null) return;
+            if (safe == null || _groundAreaRT == null) return;
 
             float halfW = _groundAreaRT.rect.width * 0.5f;
             float halfH = _groundAreaRT.rect.height * 0.5f;
-            foreach (var snap in snapshot)
+            foreach (var snap in safe)
             {
                 if (snap.ItemId == null) continue;
                 float spawnX = Random.Range(-halfW * 0.8f, halfW * 0.8f);

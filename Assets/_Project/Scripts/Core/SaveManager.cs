@@ -1,8 +1,6 @@
 using System;
 using System.IO;
-using HellpitRampage.Combat;
 using HellpitRampage.Inventory;
-using HellpitRampage.UI;
 using Newtonsoft.Json;
 using UnityEngine;
 
@@ -332,12 +330,10 @@ namespace HellpitRampage.Core
                 Gold = run.CurrentGold,
             };
 
-            var playerHealth = FindPlayerHealth();
-            if (playerHealth != null)
-            {
-                data.PlayerCurrentHp = playerHealth.CurrentHP;
-                data.PlayerMaxHp = playerHealth.MaxHP;
-            }
+            // WS-015: HP is owned by RunManager — the Shop scene, where saves fire, has no
+            // player Health component. Capture the canonical value directly.
+            data.PlayerCurrentHp = run.CurrentHp;
+            data.PlayerMaxHp = run.MaxHp;
 
             var inv = InventoryService.Instance;
             if (inv != null && inv.Grid != null)
@@ -367,36 +363,23 @@ namespace HellpitRampage.Core
                 }
             }
 
-            if (GroundManager.Current != null)
+            // WS-015: ground-item state is persisted on InventoryService (it survives the
+            // scene swap); GroundManager is only the Shop scene's view of it.
+            if (inv != null)
             {
-                var ground = GroundManager.Current.SnapshotGroundState();
-                if (ground != null)
+                foreach (var g in inv.GroundItems)
                 {
-                    foreach (var g in ground)
+                    if (g.ItemId == null) continue;
+                    data.GroundItems.Add(new GroundItemSaveEntry
                     {
-                        if (g.ItemId == null) continue;
-                        data.GroundItems.Add(new GroundItemSaveEntry
-                        {
-                            ItemId = g.ItemId.Id,
-                            Rotation = (int)g.Rotation,
-                            IsLocked = g.IsLocked,
-                        });
-                    }
+                        ItemId = g.ItemId.Id,
+                        Rotation = (int)g.Rotation,
+                        IsLocked = g.IsLocked,
+                    });
                 }
             }
 
             return data;
-        }
-
-        private static Health FindPlayerHealth()
-        {
-            // L-004: parameterless overload — the sort-mode form is now CS0618-deprecated.
-            var all = UnityEngine.Object.FindObjectsByType<Health>();
-            foreach (var h in all)
-            {
-                if (h != null && h.IsPlayer) return h;
-            }
-            return null;
         }
 
         private static void WriteAtomic(string path, string contents)
