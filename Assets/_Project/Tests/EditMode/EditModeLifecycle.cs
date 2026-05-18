@@ -10,8 +10,12 @@ namespace HellpitRampage.Tests
     /// event subscriptions made in <c>OnEnable</c> never happen. This helper runs that startup
     /// lifecycle explicitly so a fixture's components behave as they would at runtime.
     ///
-    /// The teardown half needs no help: <c>Object.DestroyImmediate</c> (used in fixture
-    /// <c>[TearDown]</c>) already invokes <c>OnDisable</c>/<c>OnDestroy</c> in edit mode.
+    /// The teardown half is NOT symmetric: because Unity never started the component's
+    /// lifecycle, <c>DestroyImmediate</c> does not invoke <c>OnDisable</c>/<c>OnDestroy</c>
+    /// either. A fixture's <c>[TearDown]</c> still calls <c>DestroyImmediate</c> to remove
+    /// the objects; a singleton's static <c>Instance</c> is left pointing at the destroyed
+    /// component, but Unity fake-null makes the next <c>Awake</c>'s duplicate-instance guard
+    /// treat it as null, so the next fixture still wires cleanly.
     /// </summary>
     internal static class EditModeLifecycle
     {
